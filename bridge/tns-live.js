@@ -71,7 +71,7 @@ function _csvVillages(districtCode, talukCode) {
 let _dataPs = null;      // the live-data browser session, or null
 let _dataAt = 0;         // last-used timestamp
 let _dataWarming = null; // in-flight start() promise (dedupe concurrent callers)
-const DATA_IDLE_MS = 3 * 60 * 1000;
+const DATA_IDLE_MS = 15 * 60 * 1000; // keep it warm long enough that dropdowns rarely cold-start
 
 async function _session() {
   if (_dataPs && _dataPs.page && !_dataPs.page.isClosed()) { _dataAt = Date.now(); return _dataPs; }
@@ -95,6 +95,11 @@ const _idleReaper = setInterval(() => {
 }, 60 * 1000);
 if (_idleReaper.unref) _idleReaper.unref();
 
+// Pre-launch the data browser shortly after boot (staggered behind the warm pool)
+// so the FIRST dropdown call isn't a ~10s cold start.
+const _prewarmTimer = setTimeout(() => { _session().catch(() => {}); }, 12000);
+if (_prewarmTimer.unref) _prewarmTimer.unref();
+
 function _enc(v) { return encodeURIComponent(String(v == null ? '' : v)); }
 
 // Back-compat: callers/monitors may still call warm()/ensure().
@@ -107,8 +112,14 @@ async function _ajaxRetry(query) {
   let out = await ps.govtAjax(query).catch((e) => ({ body: '', err: e.message }));
   let body = (out && out.body) || '';
   if (!body || body === 'false' || /INVALID ACCESS/i.test(body)) {
-    const p = _dataPs; _dataPs = null; if (p) Promise.resolve(p.close()).catch(() => {});
-    ps = await _session();
+    // Session went stale → RE-NAVIGATE the same browser (~3s) rather than
+    // cold-launching a brand-new one (~10s+).
+    try {
+      await ps.refreshSession();
+    } catch (e) {
+      const p = _dataPs; _dataPs = null; if (p) Promise.resolve(p.close()).catch(() => {});
+      ps = await _session();
+    }
     out = await ps.govtAjax(query).catch((e) => ({ body: '', err: e.message }));
     body = (out && out.body) || '';
   }
