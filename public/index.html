@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MPQR Pat Bot</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #1c2430;
+      --muted: #667085;
+      --line: #d9dee7;
+      --ok: #0f7b45;
+      --warn: #b54708;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 24px auto;
+      display: grid;
+      gap: 16px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+    .dot.ok { background: var(--ok); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    section, .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .metric {
+      padding: 16px;
+      min-height: 92px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .value {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 700;
+    }
+    section {
+      padding: 16px;
+      overflow: auto;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 720px;
+    }
+    th, td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    code {
+      display: block;
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #101828;
+      color: #f2f4f7;
+      white-space: pre;
+    }
+    @media (max-width: 760px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .value { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MPQR Pat Bot</h1>
+    <div class="status"><span id="dot" class="dot"></span><span id="state">Checking</span></div>
+  </header>
+  <main>
+    <div class="grid">
+      <div class="metric"><div class="label">Workers Verified</div><div id="workersVerified" class="value">0</div></div>
+      <div class="metric"><div class="label">Workers Need OTP</div><div id="workersOtp" class="value">0</div></div>
+      <div class="metric"><div class="label">Customer Sessions</div><div id="sessions" class="value">0</div></div>
+      <div class="metric"><div class="label">Cache Size</div><div id="cacheSize" class="value">0</div></div>
+    </div>
+    <section>
+      <h2>Worker Pool</h2>
+      <table>
+        <thead><tr><th>Slot</th><th>State</th><th>Mobile</th><th>Remaining</th><th>Served</th><th>Last Error</th></tr></thead>
+        <tbody id="workers"></tbody>
+      </table>
+    </section>
+    <section>
+      <h2>Raw Status</h2>
+      <code id="raw">{}</code>
+    </section>
+  </main>
+  <script>
+    async function getJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(url + ' returned ' + response.status);
+      return response.json();
+    }
+
+    function text(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    async function refresh() {
+      try {
+        const [health, status, sessions] = await Promise.all([
+          getJson('/health'),
+          getJson('/api/patta/status'),
+          getJson('/api/sessions'),
+        ]);
+        document.getElementById('dot').classList.add('ok');
+        text('state', health.status + ' - ' + health.version);
+        text('workersVerified', status.verifiedCount || 0);
+        text('workersOtp', status.needsOtpCount || 0);
+        text('sessions', sessions.stats.activeSessions || 0);
+        text('cacheSize', status.cache ? status.cache.cacheSize : 0);
+        document.getElementById('workers').innerHTML = (status.workers || []).map((worker) => `
+          <tr>
+            <td>${worker.slot}</td>
+            <td>${worker.state}</td>
+            <td>${worker.mobile || ''}</td>
+            <td>${worker.remainingMin || 0} min</td>
+            <td>${worker.chittasServed || 0}/${worker.maxChittas || 10}</td>
+            <td>${worker.lastError || ''}</td>
+          </tr>
+        `).join('');
+        text('raw', JSON.stringify(status, null, 2));
+      } catch (error) {
+        document.getElementById('dot').classList.remove('ok');
+        text('state', error.message);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

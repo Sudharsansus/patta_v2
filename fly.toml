@@ -1,0 +1,86 @@
+# fly.toml — Fly.io deployment for MPQR Pat Bot
+# ─────────────────────────────────────────────────────────────────
+# Mumbai region (`bom`) for an Indian IP — required by TN government
+# (eservices.tn.gov.in and tnreginet.gov.in both firewall non-IN IPs).
+#
+# Build the image with the remote builder:
+#   fly deploy --remote-only
+# The first build takes ~5 min (Playwright + Chromium ~600 MB).
+
+app = "mpqr-pat-bot"
+primary_region = "bom"           # Mumbai, India
+kill_signal = "SIGINT"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Zero-downtime deploys. `bluegreen` boots a brand-new machine, waits for its
+# /health check to pass, cuts traffic over to it, and only THEN destroys the old
+# one — so there is never a window with no healthy instance. This eliminates the
+# deploy-time "could not find a good candidate at load balancing" 503s and the
+# "machine is in a non-startable state: replacing" errors that a single-machine
+# in-place restart produces. Requires NO attached volume (see note below).
+[deploy]
+  strategy = "bluegreen"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3030"
+  PLAYWRIGHT_HEADLESS = "true"
+  PLAYWRIGHT_TIMEOUT_MS = "30000"
+  PDF_BRAND_NAME = "MyPropertyQR"
+  PDF_BRAND_TAGLINE = "Government of Tamil Nadu"
+  LOG_LEVEL = "info"
+  # HARD cap on simultaneous headless browsers (the launcher semaphore — extra
+  # launches QUEUE, never reject). This is the real memory guard: ~300 MB each, so
+  # 6 ≈ 1.8 GB, safe under 2 GB. Must be >= warm pool size + peak concurrent verifies.
+  MPQR_MAX_CONCURRENT_BROWSERS = "6"
+  # Standing pre-launched browsers parked at the govt form so "Send OTP" skips the
+  # ~5-15s cold launch (warm ~2-3s). Refilled immediately after each verify + on a tick.
+  MPQR_WARM_POOL_SIZE = "3"
+  # Keep-alive ping (ms): touches the govt session while a browser sits idle (warm
+  # pool, or holding a sent OTP while the customer reads the SMS) so its server-side
+  # JSESSIONID never times out into an "INVALID ACCESS" page — the fix for the
+  # "customer left and came back → invalid page" failures (~15% of requests).
+  MPQR_KEEPALIVE_MS = "30000"
+  # RSS ceiling (MB): the memory watchdog sheds new /start above this and, once
+  # idle, restarts cleanly BEFORE the kernel OOM-kills. Keep under the 2 GB VM.
+  MPQR_RSS_CEILING_MB = "1500"
+  # The API key (X-API-Key) is a Fly SECRET, not here: `fly secrets set MPQR_API_KEY=...`.
+
+# NO volume, NO database, NO object storage. The service is fully STATELESS: each
+# request is OTP → fetch → PDF returned as base64. Nothing is persisted, so the app
+# is trivially horizontally scalable and blue-green deploys work with no volume.
+# (An old `mpqr_data` volume may still exist in Fly; destroy it with `fly volumes list`
+# + `fly volumes destroy <id>` once this deploy is confirmed healthy.
+
+[http_service]
+  internal_port = 3030
+  force_https = true
+  auto_stop_machines = "off"      # always-on — patta bot must be reachable 24/7
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  # Health check — must return 200 for the machine to be marked healthy.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+    method = "GET"
+    path = "/health"
+
+  # Right-sized to real memory capacity: this VM fits ~5-6 live browser sessions,
+  # so hard_limit returns 503 (caller retries) instead of overpacking → OOM-kill.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 4
+    hard_limit = 6
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"                 # each live customer session pins one headless
+                                 # Chromium (~150-350 MB); 2 GB holds ~5 safely
+  cpus = 1
+  cpu_kind = "shared"

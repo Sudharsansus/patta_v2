@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MPQR Patta OTP — API Tester</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --dim:#94a3b8;
+          --accent:#0ea5b7; --ok:#22c55e; --err:#ef4444; --warn:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:900px; margin:0 auto; padding:20px; }
+  h1 { font-size:1.25rem; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:.85rem; margin-bottom:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > * { flex:1 1 200px; }
+  label { display:block; font-size:.75rem; color:var(--dim); margin:10px 0 4px; text-transform:uppercase; letter-spacing:.03em; }
+  input, select { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line);
+                  background:#0b1220; color:var(--txt); font-size:.9rem; outline:none; }
+  input:focus, select:focus { border-color:var(--accent); }
+  .radios { display:flex; gap:16px; padding-top:6px; }
+  .radios label { display:flex; align-items:center; gap:6px; margin:0; text-transform:none; color:var(--txt); font-size:.9rem; }
+  button { padding:11px 18px; border:none; border-radius:8px; background:var(--accent); color:#04222a;
+           font-weight:700; font-size:.9rem; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--txt); font-weight:500; }
+  .status { padding:10px 12px; border-radius:8px; font-size:.85rem; margin-top:12px; white-space:pre-wrap;
+            background:#0b1220; border:1px solid var(--line); }
+  .status.ok { border-color:var(--ok); } .status.err { border-color:var(--err); } .status.warn { border-color:var(--warn); }
+  .muted { color:var(--dim); font-size:.8rem; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .pill { display:inline-block; font-size:.72rem; padding:2px 8px; border-radius:999px; background:#0b1220; border:1px solid var(--line); color:var(--dim); }
+  .spin { display:inline-block; width:13px; height:13px; border:2px solid #04222a; border-top-color:transparent; border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  iframe { width:100%; height:520px; border:1px solid var(--line); border-radius:8px; background:#fff; margin-top:12px; }
+  a.dl { color:var(--accent); font-weight:600; }
+  .step { font-size:.7rem; color:var(--dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MPQR Patta OTP — API Tester</h1>
+  <div class="sub">Drives the real REST flow: <span class="pill">/api/patta/start</span> → OTP on your phone → <span class="pill">/api/patta/verify</span> → base64 PDF.</div>
+
+  <div class="card">
+    <div class="grid2">
+      <div>
+        <label>API base URL</label>
+        <input id="base" placeholder="(same origin)" />
+      </div>
+      <div>
+        <label>X-API-Key</label>
+        <input id="key" type="password" placeholder="MPQR_API_KEY" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="step">Step 1 · Parcel + mobile → send OTP</div>
+    <div class="row">
+      <div><label>District</label><select id="district"><option value="">— load —</option></select></div>
+      <div><label>Taluk</label><select id="taluk" disabled><option value="">—</option></select></div>
+      <div><label>Village</label><select id="village" disabled><option value="">—</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>Survey number</label><input id="survey" placeholder="e.g. 489/1B or 489" /></div>
+      <div><label>Sub-division</label><select id="subdiv" disabled><option value="">— enter survey —</option></select></div>
+      <div>
+        <label>Land type</label>
+        <div class="radios">
+          <label><input type="radio" name="lt" value="R" checked /> Rural</label>
+          <label><input type="radio" name="lt" value="N" /> Natham</label>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div><label>Mobile number</label><input id="mobile" placeholder="10-digit" maxlength="10" /></div>
+      <div style="flex:2 1 300px; display:flex; align-items:flex-end;">
+        <button id="btn-start" style="width:100%;">Send OTP</button>
+      </div>
+    </div>
+    <div id="s1" class="status muted">Fill the parcel + mobile, then Send OTP.</div>
+  </div>
+
+  <div class="card" id="card2" style="opacity:.5; pointer-events:none;">
+    <div class="step">Step 2 · Enter OTP → get PDF</div>
+    <div class="row">
+      <div><label>Reference ID</label><input id="ref" readonly /></div>
+      <div><label>OTP (from your SMS)</label><input id="otp" placeholder="4–8 digits" /></div>
+      <div style="display:flex; align-items:flex-end; gap:8px;">
+        <button id="btn-verify" style="flex:1;">Verify &amp; Download</button>
+        <button id="btn-resend" class="ghost">Resend</button>
+      </div>
+    </div>
+    <div id="s2" class="status muted">Waiting for OTP…</div>
+    <div id="result"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const base = () => ($('base').value || '').replace(/\/$/, '');
+const key = () => $('key').value.trim();
+$('base').value = localStorage.getItem('mpqr_base') || '';
+$('key').value = localStorage.getItem('mpqr_key') || '';
+$('base').oninput = () => localStorage.setItem('mpqr_base', $('base').value);
+$('key').oninput = () => localStorage.setItem('mpqr_key', $('key').value);
+// Re-load the districts whenever the key (or base) changes, so a corrected key
+// populates the dropdowns immediately instead of only on a full page reload.
+$('key').onchange = () => { localStorage.setItem('mpqr_key', $('key').value); loadDistricts(); };
+$('base').onchange = () => { localStorage.setItem('mpqr_base', $('base').value); loadDistricts(); };
+
+async function api(path, opts = {}) {
+  const r = await fetch(base() + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': key(), ...(opts.headers || {}) },
+  });
+  const text = await r.text();
+  let json; try { json = JSON.parse(text); } catch (e) { json = { status:false, message:text.slice(0,300) }; }
+  return { ok: r.ok, code: r.status, json };
+}
+function setStatus(el, msg, kind) { el.className = 'status ' + (kind || ''); el.textContent = msg; }
+const nameOf = (sel) => sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.name : '';
+
+// ── Cascade dropdowns via /api/live/* ──────────────────────────────
+async function loadDistricts() {
+  const { ok, json } = await api('/api/live/districts');
+  if (!ok || !json.districts) { setStatus($('s1'), 'Could not load districts: ' + (json.message||''), 'err'); return; }
+  fill($('district'), json.districts);
+}
+function fill(sel, list, disabled) {
+  sel.innerHTML = '<option value="">— select —</option>' + list.map(x =>
+    `<option value="${x.code}" data-name="${(x.name||'').replace(/"/g,'&quot;')}" data-nflag="${x.nflag||'Y'}">${x.name||x.code}</option>`).join('');
+  sel.disabled = false;
+}
+function resetSubdiv(msg) { $('subdiv').innerHTML = `<option value="">${msg || '—'}</option>`; $('subdiv').disabled = true; }
+
+$('district').onchange = async () => {
+  $('taluk').innerHTML = '<option>…</option>'; $('taluk').disabled = true;
+  $('village').innerHTML = '<option>—</option>'; $('village').disabled = true;
+  resetSubdiv('— enter survey —');
+  if (!$('district').value) return;
+  const { json } = await api('/api/live/taluks?district=' + $('district').value);
+  fill($('taluk'), json.taluks || []);
+};
+$('taluk').onchange = async () => {
+  $('village').innerHTML = '<option>…</option>'; $('village').disabled = true;
+  resetSubdiv('— enter survey —');
+  if (!$('taluk').value) return;
+  const { json } = await api('/api/live/villages?district=' + $('district').value + '&taluk=' + $('taluk').value);
+  fill($('village'), json.villages || []);
+};
+$('village').onchange = loadSubdivs;
+$('survey').onchange = loadSubdivs;
+document.querySelectorAll('input[name=lt]').forEach((r) => { r.onchange = loadSubdivs; });
+
+// Sub-division is the one parcel field with a live govt lookup (getSubdivNo); it
+// needs the survey number first, so village/survey/land-type changes reload it.
+async function loadSubdivs() {
+  const d = $('district').value, t = $('taluk').value, v = $('village').value;
+  const survey = ($('survey').value.split('/')[0] || '').trim();
+  const lt = document.querySelector('input[name=lt]:checked').value;
+  const opt = $('taluk').options[$('taluk').selectedIndex];
+  const nflag = (opt && opt.dataset.nflag) || 'Y';
+  if (!d || !t || !v || !survey) return resetSubdiv('— enter survey —');
+  $('subdiv').innerHTML = '<option>…</option>'; $('subdiv').disabled = true;
+  const q = `/api/live/subdivs?district=${d}&taluk=${t}&village=${v}&survey=${encodeURIComponent(survey)}&nflag=${nflag}&landtype=${lt}`;
+  const { json } = await api(q);
+  const subs = (json.subdivs || []).map((s) => (typeof s === 'string' ? s : (s.code || s)));
+  if (!subs.length) return resetSubdiv('(none found)');
+  $('subdiv').innerHTML = '<option value="">— select —</option>' + subs.map((s) => `<option value="${s}">${s}</option>`).join('');
+  $('subdiv').disabled = false;
+}
+
+// ── Step 1: send OTP ───────────────────────────────────────────────
+$('btn-start').onclick = async () => {
+  if (!key()) return setStatus($('s1'), 'Enter the API key first.', 'err');
+  const mobile = $('mobile').value.trim();
+  if (!/^[6-9]\d{9}$/.test(mobile)) return setStatus($('s1'), 'Enter a valid 10-digit mobile.', 'err');
+  if (!nameOf($('village'))) return setStatus($('s1'), 'Pick district → taluk → village.', 'err');
+  const payload = {
+    mobileNo: mobile,
+    districtName: nameOf($('district')),
+    talukName: nameOf($('taluk')),
+    villageName: nameOf($('village')),
+    surveyNumber: $('survey').value.trim(),
+    subDivisionNumber: $('subdiv').value.trim(),
+    landType: document.querySelector('input[name=lt]:checked').value,
+    typeOfDocument: 'Patta',
+    memberId: 'dashboard-test',
+  };
+  $('btn-start').disabled = true;
+  setStatus($('s1'), 'Sending OTP…  (cold call can take ~15s; warm ~2s)', 'warn');
+  const t = Date.now();
+  const { ok, code, json } = await api('/api/patta/start', { method:'POST', body: JSON.stringify(payload) });
+  $('btn-start').disabled = false;
+  if (ok && json.status) {
+    $('ref').value = json.referenceId;
+    setStatus($('s1'), `✓ OTP sent in ${Date.now()-t}ms · referenceId ${json.referenceId}`, 'ok');
+    $('card2').style.opacity = 1; $('card2').style.pointerEvents = 'auto';
+    $('otp').focus();
+  } else {
+    setStatus($('s1'), `✗ ${code}: ${json.message}`, 'err');
+  }
+};
+
+// ── Step 2: verify → PDF ───────────────────────────────────────────
+$('btn-verify').onclick = async () => {
+  const otp = $('otp').value.trim();
+  if (!/^\d{4,8}$/.test(otp)) return setStatus($('s2'), 'Enter the 4–8 digit OTP.', 'err');
+  $('btn-verify').disabled = true;
+  setStatus($('s2'), 'Verifying + fetching PDF… ', 'warn');
+  const t = Date.now();
+  const { ok, code, json } = await api('/api/patta/verify', { method:'POST', body: JSON.stringify({ referenceId: $('ref').value, otp }) });
+  $('btn-verify').disabled = false;
+  if (ok && json.status && json.data) {
+    setStatus($('s2'), `✓ PDF received in ${Date.now()-t}ms (${Math.round(json.data.length*0.75/1024)} KB)`, 'ok');
+    const url = 'data:application/pdf;base64,' + json.data;
+    $('result').innerHTML =
+      `<div style="margin-top:12px;"><a class="dl" href="${url}" download="patta.pdf">⬇ Download patta.pdf</a></div>
+       <iframe src="${url}"></iframe>`;
+  } else {
+    setStatus($('s2'), `✗ ${code}: ${json.message}`, 'err');
+  }
+};
+$('btn-resend').onclick = async () => {
+  const { json } = await api('/api/patta/resend', { method:'POST', body: JSON.stringify({ referenceId: $('ref').value }) });
+  setStatus($('s2'), json.status ? 'OTP resent.' : ('Resend failed: ' + json.message), json.status ? 'ok' : 'err');
+};
+
+loadDistricts();
+</script>
+</body>
+</html>
