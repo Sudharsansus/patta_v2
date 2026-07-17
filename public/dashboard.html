@@ -152,7 +152,9 @@ $('taluk').onchange = async () => {
   fill($('village'), json.villages || []);
 };
 $('village').onchange = loadSubdivs;
-$('survey').onchange = loadSubdivs;
+$('survey').onchange = loadSubdivs;              // fires on blur
+let _subTimer;                                   // ...and as you TYPE (debounced),
+$('survey').oninput = () => { clearTimeout(_subTimer); _subTimer = setTimeout(loadSubdivs, 500); };
 document.querySelectorAll('input[name=lt]').forEach((r) => { r.onchange = loadSubdivs; });
 
 // Sub-division is the one parcel field with a live govt lookup (getSubdivNo); it
