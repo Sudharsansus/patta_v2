@@ -39,11 +39,10 @@ kill_timeout = "30s"
   # Standing pre-launched browsers parked at the govt form so "Send OTP" skips the
   # ~5-15s cold launch (warm ~2-3s). Refilled immediately after each verify + on a tick.
   MPQR_WARM_POOL_SIZE = "3"
-  # Keep-alive ping (ms): touches the govt session while a browser sits idle (warm
-  # pool, or holding a sent OTP while the customer reads the SMS) so its server-side
-  # JSESSIONID never times out into an "INVALID ACCESS" page — the fix for the
-  # "customer left and came back → invalid page" failures (~15% of requests).
-  MPQR_KEEPALIVE_MS = "30000"
+  # Keep-alive DISABLED (0). The in-page ser=dist ping corrupted the live govt OTP
+  # session (govt then rejected correct OTPs as "invalid otp"). Left off until a
+  # safe idle-refresh approach is proven against a real OTP. (>0 to re-enable.)
+  MPQR_KEEPALIVE_MS = "0"
   # RSS ceiling (MB): the memory watchdog sheds new /start above this and, once
   # idle, restarts cleanly BEFORE the kernel OOM-kills. Keep under the 2 GB VM.
   MPQR_RSS_CEILING_MB = "1500"
