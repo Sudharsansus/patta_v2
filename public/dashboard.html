@@ -181,8 +181,16 @@ $('btn-start').onclick = async () => {
   const mobile = $('mobile').value.trim();
   if (!/^[6-9]\d{9}$/.test(mobile)) return setStatus($('s1'), 'Enter a valid 10-digit mobile.', 'err');
   if (!nameOf($('village'))) return setStatus($('s1'), 'Pick district → taluk → village.', 'err');
+  // Send CODES (we already have them from the dropdowns) so the server SKIPS the
+  // name→code resolution — that was 3 extra govt round-trips (the ~25s tail). Names
+  // are still sent for display/echo only.
+  const talukOpt = $('taluk').options[$('taluk').selectedIndex];
   const payload = {
     mobileNo: mobile,
+    districtCode: $('district').value,
+    talukCode: $('taluk').value,
+    villageCode: $('village').value,
+    nflag: (talukOpt && talukOpt.dataset.nflag) || 'Y',
     districtName: nameOf($('district')),
     talukName: nameOf($('taluk')),
     villageName: nameOf($('village')),

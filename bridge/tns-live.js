@@ -124,14 +124,22 @@ function _parseArray(body) {
 
 const byName = (a, b) => a.name.localeCompare(b.name);
 
+// In-memory cache for the (rarely-changing) govt reference data. This is what
+// makes name→code resolution + the /api/live/* dropdowns fast: the govt (and the
+// cold data-browser) is hit at most once per key per TTL, not on every request.
+const _cache = new Map(); // key -> { at, ttl, val }
+function _cget(key) { const e = _cache.get(key); return e && Date.now() - e.at < e.ttl ? e.val : null; }
+function _cset(key, val, ttl) { _cache.set(key, { at: Date.now(), ttl, val }); return val; }
+
 async function getDistricts() {
+  const cached = _cget('dist'); if (cached) return cached;
   try {
     const body = await _ajaxRetry('page=ruralservice&ser=dist&lang=ta&type=rur&call_type=ser');
     const arr = _parseArray(body)
       .map(d => ({ code: d.dcode, name: (d.dname || '').trim(), tamil: (d.dtname || '').trim() }))
       .filter(d => d.code)
       .sort(byName);
-    if (arr.length > 0) return arr;
+    if (arr.length > 0) return _cset('dist', arr, 6 * 60 * 60 * 1000);
   } catch (e) { /* fall through to CSV */ }
   // BUG 4 FIX: CSV fallback
   const csv = _csvDistricts();
@@ -141,13 +149,14 @@ async function getDistricts() {
 
 async function getTaluks(districtCode) {
   if (!districtCode) throw new Error('districtCode required');
+  const ck = 'tlk:' + districtCode; const cached = _cget(ck); if (cached) return cached;
   try {
     const body = await _ajaxRetry('page=ruralservice&ser=tlk&distcode=' + _enc(districtCode) + '&lang=ta&type=rur&call_type=ser');
     const arr = _parseArray(body)
       .map(t => ({ code: t.tcode, name: (t.tname || '').trim(), tamil: (t.ttname || '').trim(), nflag: (t.nflag || 'Y').trim() }))
       .filter(t => t.code)
       .sort(byName);
-    if (arr.length > 0) return arr;
+    if (arr.length > 0) return _cset(ck, arr, 60 * 60 * 1000);
   } catch (e) { /* fall through to CSV */ }
   // BUG 4 FIX: CSV fallback
   return _csvTaluks(districtCode);
@@ -155,13 +164,14 @@ async function getTaluks(districtCode) {
 
 async function getVillages(districtCode, talukCode) {
   if (!districtCode || !talukCode) throw new Error('districtCode and talukCode required');
+  const ck = 'vill:' + districtCode + ':' + talukCode; const cached = _cget(ck); if (cached) return cached;
   try {
     const body = await _ajaxRetry('page=ruralservice&ser=vill&distcode=' + _enc(districtCode) + '&talukcode=' + _enc(talukCode) + '&lang=ta&type=rur&call_type=ser');
     const arr = _parseArray(body)
       .map(v => ({ code: v.villagecode, name: (v.villagename || '').trim(), tamil: (v.villagetname || '').trim() }))
       .filter(v => v.code)
       .sort(byName);
-    if (arr.length > 0) return arr;
+    if (arr.length > 0) return _cset(ck, arr, 60 * 60 * 1000);
   } catch (e) { /* fall through to CSV */ }
   // BUG 4 FIX: CSV fallback
   return _csvVillages(districtCode, talukCode);
