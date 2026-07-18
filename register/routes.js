@@ -16,20 +16,22 @@ const VERSION = '1.0.0';
 
 function makeRefId(p) {
   const ts = Math.floor(Date.now() / 1000);
-  return `EC-${p.districtId}-${p.sroId}-${p.villageCode}-${p.surveyNo}-${ts}`;
+  const office = p.sroId || p.talukId || 'rev';
+  return `EC-${p.districtId}-${office}-${p.villageCode}-${p.surveyNo}-${ts}`;
 }
 
 function parcelFrom(b = {}) {
   return {
-    zoneId: b.zoneId, districtId: b.districtId, sroId: b.sroId, villageCode: b.villageCode,
-    surveyNo: b.surveyNo, flatNo: b.flatNo || '', plotNo: b.plotNo || '',
+    zoneId: b.zoneId, districtId: b.districtId, sroId: b.sroId || '', talukId: b.talukId || '',
+    villageCode: b.villageCode, surveyNo: b.surveyNo, flatNo: b.flatNo || '', plotNo: b.plotNo || '',
     ecPeriodStartDt: b.ecPeriodStartDt, ecPeriodEndDt: b.ecPeriodEndDt,
     isRevenueVillage: b.isRevenueVillage !== false,
   };
 }
 
 function validateParcel(p) {
-  if (!p.districtId || !p.sroId || !p.villageCode) return 'districtId, sroId and villageCode are required';
+  // sroId is optional — the revenue-village path uses district → taluk → village.
+  if (!p.districtId || !p.villageCode) return 'districtId and villageCode are required';
   if (!/^[0-9A-Za-z/-]{1,12}$/.test(String(p.surveyNo || ''))) return 'Invalid survey number';
   return null;
 }

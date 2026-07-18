@@ -43,7 +43,7 @@
     <div class="row">
       <div><label>Zone</label><select id="zone"><option value="">—</option></select></div>
       <div><label>District</label><select id="district" disabled><option value="">—</option></select></div>
-      <div><label>SRO</label><select id="sro" disabled><option value="">—</option></select></div>
+      <div><label>Taluk</label><select id="taluk" disabled><option value="">—</option></select></div>
       <div><label>Village</label><select id="village" disabled><option value="">—</option></select></div>
     </div>
     <div class="row">
@@ -87,9 +87,9 @@ async function api(path, opts={}) {
   return { code:r.status, j };
 }
 function parcel() {
-  return { zoneId:$('zone').value, districtId:$('district').value, sroId:$('sro').value,
+  return { zoneId:$('zone').value, districtId:$('district').value, talukId:$('taluk').value,
     villageCode:$('village').value, surveyNo:$('survey').value.trim(),
-    ecPeriodStartDt:$('start').value.trim(), ecPeriodEndDt:$('end').value.trim(), isRevenueVillage:false };
+    ecPeriodStartDt:$('start').value.trim(), ecPeriodEndDt:$('end').value.trim(), isRevenueVillage:true };
 }
 function fill(sel, list, valKey, nameKey) {
   sel.innerHTML = '<option value="">— select —</option>' + list.map(x => `<option value="${x[valKey]}">${x[nameKey]}</option>`).join('');
@@ -110,10 +110,10 @@ setInterval(refreshPool, 5000);
 async function loadZones(){ const {j}=await api('/districts'); $('zone').innerHTML='<option value="">— select —</option>'+j.zones.map(z=>`<option value="${z.zoneId}" data-d='${JSON.stringify(z.districts)}'>${z.zoneName}</option>`).join(''); }
 $('zone').onchange = () => {
   const opt=$('zone').options[$('zone').selectedIndex]; const ds=opt&&opt.dataset.d?JSON.parse(opt.dataset.d):[];
-  fill($('district'), ds, 'districtId','districtName'); $('sro').innerHTML='<option>—</option>'; $('sro').disabled=true; $('village').innerHTML='<option>—</option>'; $('village').disabled=true;
+  fill($('district'), ds, 'districtId','districtName'); $('taluk').innerHTML='<option>—</option>'; $('taluk').disabled=true; $('village').innerHTML='<option>—</option>'; $('village').disabled=true;
 };
-$('district').onchange = async () => { if(!$('district').value) return; const {j}=await api('/sros?districtId='+$('district').value); fill($('sro'), j.sros||[], 'sroId','sroName'); $('village').innerHTML='<option>—</option>'; $('village').disabled=true; };
-$('sro').onchange = async () => { if(!$('sro').value) return; const {j}=await api('/villages?sroId='+$('sro').value); fill($('village'), j.villages||[], 'villageCode','villageName'); };
+$('district').onchange = async () => { if(!$('district').value) return; $('taluk').innerHTML='<option>…</option>'; const {j}=await api('/rev-taluks?districtId='+$('district').value); fill($('taluk'), j.revTaluks||[], 'talukId','talukName'); $('village').innerHTML='<option>—</option>'; $('village').disabled=true; };
+$('taluk').onchange = async () => { if(!$('taluk').value) return; $('village').innerHTML='<option>…</option>'; const {j}=await api('/rev-villages?talukId='+encodeURIComponent($('taluk').value)); fill($('village'), j.revVillages||[], 'villageCode','villageName'); };
 
 // ── Quick EC ──
 $('btnQuick').onclick = async () => {
