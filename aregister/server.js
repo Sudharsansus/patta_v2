@@ -27,7 +27,7 @@ const patBot = require('../lib');
 const { generateMergedPdf } = require('../lib/pdf-generator');
 const { browserStats } = require('../lib/browser-launcher');
 const logger = require('../lib/logger');
-const { classify } = require('../lib/errors');
+const { classify, E } = require('../lib/errors');
 const { makeBreaker } = require('../lib/govt-breaker');
 const { IdempotencyCache } = require('../lib/verify-idempotency');
 const { startMemWatchdog } = require('../lib/mem-watchdog');
@@ -85,7 +85,7 @@ function toParcel(payload) {
 const govtStart = makeBreaker('areg-start', async (mobile, payload) => {
   const parcel = toParcel(payload);
   if (!parcel.districtCode || !parcel.talukCode || !parcel.villageCode || !parcel.surveyNo) {
-    throw Object.assign(new Error('districtCode, talukCode, villageCode and surveyNumber are required'), { code: 'INVALID_INPUT' });
+    throw E.INVALID_INPUT('districtCode, talukCode, villageCode and surveyNumber are required');
   }
   const out = await patBot.beginVerification(mobile, parcel);
   return { out, parcel };
@@ -204,7 +204,7 @@ async function main() {
         try { pdfBuffer = await generateMergedPdf({ chittaHtml: verify.html }); }
         catch (mergeErr) { return sendError(req, res, mergeErr, 'verify', { t0, referenceId, wasted: true }); }
       }
-      if (!pdfBuffer) return sendError(req, res, Object.assign(new Error('A-Register unavailable after OTP'), { code: 'CHITTA_UNAVAILABLE', wasted: true }), 'verify', { t0, referenceId });
+      if (!pdfBuffer) return sendError(req, res, Object.assign(E.CHITTA_UNAVAILABLE('A-Register unavailable after OTP'), { wasted: true }), 'verify', { t0, referenceId });
 
       (req.log || logger).info({ refId: referenceId, bytes: pdfBuffer.length, ms: Date.now() - t0 }, 'A-Register delivered');
       return res.json({
