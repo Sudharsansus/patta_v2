@@ -19,6 +19,7 @@ COPY bridge ./bridge
 COPY data ./data
 COPY public ./public
 COPY register ./register
+COPY aregister ./aregister
 
 ENV NODE_ENV=production \
     PLAYWRIGHT_HEADLESS=true \
