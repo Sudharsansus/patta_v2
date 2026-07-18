@@ -94,30 +94,6 @@
     <div id="s2" class="status muted">Waiting for OTP…</div>
     <div id="result"></div>
   </div>
-
-  <div class="card" id="card3" style="opacity:.5; pointer-events:none;">
-    <div class="step">Step 3 · Borrow — fetch ANOTHER parcel with NO new OTP</div>
-    <div class="muted" style="margin-bottom:8px;">Reuses the session you just verified in Step 2. If the government allows it, this proves customers can download an A-Register <b>without their own OTP</b>. Pick a <b>different</b> parcel:</div>
-    <div class="row">
-      <div><label>District</label><select id="bd"><option value="">— select —</option></select></div>
-      <div><label>Taluk</label><select id="bt" disabled><option value="">—</option></select></div>
-      <div><label>Village</label><select id="bv" disabled><option value="">—</option></select></div>
-    </div>
-    <div class="row">
-      <div><label>Survey number</label><input id="bs" placeholder="e.g. 123/2 or 123" /></div>
-      <div><label>Sub-division</label><select id="bsub" disabled><option value="">— enter survey —</option></select></div>
-      <div>
-        <label>Land type</label>
-        <div class="radios">
-          <label><input type="radio" name="blt" value="R" checked /> Rural</label>
-          <label><input type="radio" name="blt" value="N" /> Natham</label>
-        </div>
-      </div>
-    </div>
-    <button id="btn-borrow" style="width:100%; margin-top:8px;">Fetch without OTP</button>
-    <div id="s3" class="status muted">Verify a parcel in Step 2 first, then try a different parcel here.</div>
-    <div id="bresult"></div>
-  </div>
 </div>
 
 <script>
@@ -248,10 +224,6 @@ $('btn-verify').onclick = async () => {
     $('result').innerHTML =
       `<div style="margin-top:12px;"><a class="dl" href="${url}" download="aregister.pdf">⬇ Download aregister.pdf</a></div>
        <iframe src="${url}"></iframe>`;
-    // Unlock Step 3 — the session is now verified + retained for OTP-free borrows.
-    $('card3').style.opacity = 1; $('card3').style.pointerEvents = 'auto';
-    setStatus($('s3'), 'Session verified. Pick a DIFFERENT parcel and fetch it with no OTP.', 'muted');
-    bLoadDistricts();
   } else {
     setStatus($('s2'), `✗ ${code}: ${json.message}`, 'err');
   }
@@ -259,70 +231,6 @@ $('btn-verify').onclick = async () => {
 $('btn-resend').onclick = async () => {
   const { json } = await api('/api/aregister/resend', { method:'POST', body: JSON.stringify({ referenceId: $('ref').value }) });
   setStatus($('s2'), json.status ? 'OTP resent.' : ('Resend failed: ' + json.message), json.status ? 'ok' : 'err');
-};
-
-// ── Step 3: BORROW another parcel with NO OTP ──────────────────────
-async function bLoadDistricts() {
-  const { ok, json } = await api('/api/live/districts');
-  if (ok && json.districts) fill($('bd'), json.districts);
-}
-function bResetSub(msg) { $('bsub').innerHTML = `<option value="">${msg || '— enter survey —'}</option>`; $('bsub').disabled = true; }
-$('bd').onchange = async () => {
-  $('bt').innerHTML = '<option>loading…</option>'; $('bt').disabled = true;
-  $('bv').innerHTML = '<option>—</option>'; $('bv').disabled = true; bResetSub();
-  if (!$('bd').value) return;
-  const { ok, json } = await api('/api/live/taluks?district=' + $('bd').value);
-  if (!ok || !(json.taluks && json.taluks.length)) {
-    $('bt').innerHTML = '<option value="">— could not load —</option>';
-    return setStatus($('s3'), 'Taluks did not load: ' + (json.message || 'try again'), 'err');
-  }
-  fill($('bt'), json.taluks);
-};
-$('bt').onchange = async () => {
-  $('bv').innerHTML = '<option>…</option>'; $('bv').disabled = true; bResetSub();
-  if (!$('bt').value) return;
-  const { json } = await api('/api/live/villages?district=' + $('bd').value + '&taluk=' + $('bt').value);
-  fill($('bv'), json.villages || []);
-};
-$('bv').onchange = bLoadSub; $('bs').onchange = bLoadSub;
-let _bt2; $('bs').oninput = () => { clearTimeout(_bt2); _bt2 = setTimeout(bLoadSub, 500); };
-document.querySelectorAll('input[name=blt]').forEach((r) => { r.onchange = bLoadSub; });
-async function bLoadSub() {
-  const d = $('bd').value, t = $('bt').value, v = $('bv').value, survey = ($('bs').value.split('/')[0] || '').trim();
-  const lt = document.querySelector('input[name=blt]:checked').value;
-  const opt = $('bt').options[$('bt').selectedIndex]; const nflag = (opt && opt.dataset.nflag) || 'Y';
-  if (!d || !t || !v || !survey) return bResetSub();
-  $('bsub').innerHTML = '<option>…</option>'; $('bsub').disabled = true;
-  const { json } = await api(`/api/live/subdivs?district=${d}&taluk=${t}&village=${v}&survey=${encodeURIComponent(survey)}&nflag=${nflag}&landtype=${lt}`);
-  const subs = (json.subdivs || []).map((s) => (typeof s === 'string' ? s : (s.code || s)));
-  if (!subs.length) return bResetSub('(none found)');
-  $('bsub').innerHTML = '<option value="">— select —</option>' + subs.map((s) => `<option value="${s}">${s}</option>`).join('');
-  $('bsub').disabled = false;
-}
-$('btn-borrow').onclick = async () => {
-  if (!nameOf($('bv'))) return setStatus($('s3'), 'Pick district → taluk → village.', 'err');
-  const talukOpt = $('bt').options[$('bt').selectedIndex];
-  const payload = {
-    referenceId: $('ref').value,
-    districtCode: $('bd').value, talukCode: $('bt').value, villageCode: $('bv').value,
-    nflag: (talukOpt && talukOpt.dataset.nflag) || 'Y',
-    surveyNumber: $('bs').value.trim(), subDivisionNumber: $('bsub').value.trim(),
-    landType: document.querySelector('input[name=blt]:checked').value,
-  };
-  $('btn-borrow').disabled = true;
-  setStatus($('s3'), 'Fetching this parcel WITHOUT an OTP…', 'warn');
-  const t = Date.now();
-  const { ok, code, json } = await api('/api/aregister/borrow', { method:'POST', body: JSON.stringify(payload) });
-  $('btn-borrow').disabled = false;
-  if (ok && json.status && json.data) {
-    setStatus($('s3'), `✓ BORROW WORKED — got the A-Register with NO OTP in ${Date.now()-t}ms (${Math.round(json.data.length*0.75/1024)} KB). Session reuse is viable!`, 'ok');
-    const url = 'data:application/pdf;base64,' + json.data;
-    $('bresult').innerHTML =
-      `<div style="margin-top:12px;"><a class="dl" href="${url}" download="aregister-borrowed.pdf">⬇ Download aregister-borrowed.pdf</a></div>
-       <iframe src="${url}"></iframe>`;
-  } else {
-    setStatus($('s3'), `✗ ${code}: ${json.message}`, 'err');
-  }
 };
 
 loadDistricts();
