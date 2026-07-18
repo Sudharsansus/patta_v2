@@ -11,6 +11,7 @@ const store = require('./store');
 const dropdowns = require('./dropdowns');
 const { createSession, FakeSession } = require('./tnreginet');
 const { RegisterPool } = require('./pool');
+const solver = require('./captcha-solver');
 
 const VERSION = '1.0.0';
 
@@ -50,9 +51,39 @@ function build() {
     if (!res.headersSent) res.status(500).json({ ok: false, error: e && e.message ? e.message : 'internal error' });
   });
 
+  // Auto-solve path (TrueCaptcha): open a fresh session, solve its captcha, search,
+  // capture the EC PDF — with retries on a wrong solve. Powers Quick EC when the pool
+  // is empty, so no human ever has to type a captcha. Returns {ok,...} or {status,code,error}.
+  async function autoSolveSearch(parcel, reqOrigin) {
+    let sess;
+    try { sess = await createSession(); }
+    catch (e) { return { status: 503, code: 'TNREGINET_DOWN', error: 'TNREGINET is unreachable. Try again later.' }; }
+    try {
+      for (let i = 0; i <= config.captchaAutoRetries; i++) {
+        const cap = await sess.fetchCaptcha();
+        let text;
+        try { text = await solver.solve(cap.captchaImage); }
+        catch (e) { return { status: 502, code: 'SOLVER_ERROR', error: 'Captcha solver failed: ' + e.message }; }
+        try {
+          const records = await sess.searchEc(parcel, text);
+          const pdf = await sess.captureEcPdf();
+          const refId = makeRefId(parcel);
+          const { url } = await store.putPdf(refId, pdf, reqOrigin);
+          return { ok: true, refId, pdfUrl: url, ecRecords: records };
+        } catch (e) {
+          if (e.code === 'CAPTCHA_WRONG') { try { await sess.refreshCaptcha(); } catch (_) {} continue; } // re-solve
+          if (e.code === 'NO_RECORDS') return { status: 400, code: 'NO_RECORDS', error: 'No EC records found for the given survey number in the date range.' };
+          return { status: 503, code: 'TNREGINET_ERROR', error: 'TNREGINET error: ' + e.message };
+        }
+      }
+      return { status: 502, code: 'CAPTCHA_UNSOLVED', error: `Could not auto-solve the captcha after ${config.captchaAutoRetries + 1} tries` };
+    } finally { try { await sess.close(); } catch (_) {} }
+  }
+
   // ── 1) health ──────────────────────────────────────────────────────────────
   router.get('/health', (req, res) => res.json({
-    ok: true, module: 'register', version: VERSION, pool: pool.health(), captchaSolver: config.captchaMode,
+    ok: true, module: 'register', version: VERSION, pool: pool.health(),
+    captchaSolver: solver.enabled() ? 'truecaptcha' : config.captchaMode,
   }));
 
   // ── 2-6) dropdowns ─────────────────────────────────────────────────────────
@@ -139,7 +170,16 @@ function build() {
     if (!store.available()) return res.status(503).json({ ok: false, needStorage: true, error: 'Storage not configured. Set S3_BUCKET/S3_ACCESS_KEY/S3_SECRET_KEY or LOCAL_PDF_DIR.' });
 
     const entry = pool.borrow();
-    if (!entry) return res.status(503).json({ ok: false, needCaptcha: true, code: 'POOL_EMPTY', error: 'No verified sessions in pool. Please solve a captcha to fetch.' });
+    if (!entry) {
+      // Empty pool: if auto-solve is enabled (TrueCaptcha), solve a fresh captcha
+      // ourselves so Quick EC still works — no human needed.
+      if (solver.enabled() || config.testMode) {
+        const r = await autoSolveSearch(parcel, origin(req));
+        if (r.ok) return res.json({ ok: true, ms: Date.now() - t0, source: 'auto_captcha', refId: r.refId, pdfUrl: r.pdfUrl, ecRecords: r.ecRecords });
+        return res.status(r.status || 503).json({ ok: false, code: r.code, error: r.error });
+      }
+      return res.status(503).json({ ok: false, needCaptcha: true, code: 'POOL_EMPTY', error: 'No verified sessions in pool. Please solve a captcha to fetch.' });
+    }
 
     try {
       // Borrowed session is already captcha-validated for the 30-min window.

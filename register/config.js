@@ -15,10 +15,16 @@ module.exports = {
   healthCheckMs: num(process.env.REGISTER_HEALTH_CHECK_MS, 5 * 60 * 1000), // reap dead browsers every 5 min
   csrfRotateMs: num(process.env.REGISTER_CSRF_ROTATE_MS, 30 * 60 * 1000),
 
-  // Captcha
-  captchaMode: (process.env.CAPTCHA_MODE || 'hitl').toLowerCase(), // v1: hitl only (human-in-the-loop)
+  // Captcha. 'hitl' = human types it; 'truecaptcha' = auto-solve via TrueCaptcha API.
+  captchaMode: (process.env.CAPTCHA_MODE || 'hitl').toLowerCase(),
   captchaSolveTimeoutMs: num(process.env.CAPTCHA_TIMEOUT_MS, 10000),
   captchaSessionTtlMs: num(process.env.REGISTER_CAPTCHA_TTL_MS, 5 * 60 * 1000), // 5 min to type it
+  captchaAutoRetries: num(process.env.CAPTCHA_AUTO_RETRIES, 3), // re-solve attempts on a wrong solve
+  truecaptcha: {
+    url: process.env.TRUECAPTCHA_URL || 'https://api.apitruecaptcha.org/one/gettext',
+    userid: process.env.TRUECAPTCHA_USERID || null,
+    apikey: process.env.TRUECAPTCHA_APIKEY || null,
+  },
 
   // Playwright (shared knobs with patta)
   headless: !/^(0|false|no|off)$/i.test(String(process.env.PLAYWRIGHT_HEADLESS ?? 'true')),
