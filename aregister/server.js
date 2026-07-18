@@ -91,7 +91,8 @@ const govtStart = makeBreaker('areg-start', async (mobile, payload) => {
   return { out, parcel };
 }, { timeout: 120000 });
 const govtVerify = makeBreaker('areg-verify', async (pendingId, otp) => (
-  patBot.completeVerification(pendingId, otp)
+  // retain: keep the verified session so /borrow can fetch other parcels OTP-free.
+  patBot.completeVerification(pendingId, otp, { retain: true })
 ), { timeout: 180000 });
 
 const TERMINAL_CODES = new Set(['WRONG_OTP', 'CHITTA_UNAVAILABLE', 'RATE_LIMITED', 'INVALID_INPUT', 'SESSION_EXPIRED', 'VERIFY_EXPIRED']);
@@ -230,6 +231,41 @@ async function main() {
       return res.json({ status: true, message: 'OTP resent', referenceId: makeRefId(out.pendingId), ttlSeconds: out.ttlSeconds });
     } catch (e) {
       return sendError(req, res, e, 'resend', { t0, referenceId });
+    }
+  });
+
+  // ── 4) BORROW: fetch ANOTHER parcel on the verified session — NO new OTP ──
+  // Validates the session-reuse model: after one /verify, can we pull a DIFFERENT
+  // parcel's A-Register without another OTP? Consumes no OTP, so a failure is safe.
+  app.post('/api/aregister/borrow', async (req, res) => {
+    const t0 = Date.now();
+    const b = req.body || {};
+    const referenceId = b.referenceId || b.pendingId;
+    try {
+      const { machineId, pendingId } = parseRefId(referenceId);
+      if (machineId && machineId !== MACHINE_ID && machineId !== 'local') {
+        res.set('fly-replay', `instance=${machineId}`);
+        return res.status(202).json({ status: false, code: 'REPLAY', message: 'routing to the session owner' });
+      }
+      const parcel = toParcel(b);
+      if (!parcel.districtCode || !parcel.talukCode || !parcel.villageCode || !parcel.surveyNo) {
+        return res.status(400).json({ status: false, code: 'INVALID_INPUT', message: 'districtCode, talukCode, villageCode and surveyNumber are required' });
+      }
+      const out = await patBot.borrowParcel(pendingId, parcel);
+      if (!out || !out.pdf) {
+        return res.status(422).json({
+          status: false, code: 'BORROW_REJECTED', ms: Date.now() - t0,
+          message: 'No A-Register returned for this parcel on the borrowed session — the government may bind the session to the OTP-verified parcel.',
+        });
+      }
+      const pdfBuffer = Buffer.from(out.pdf);
+      (req.log || logger).info({ refId: referenceId, bytes: pdfBuffer.length, ms: Date.now() - t0 }, 'A-Register BORROWED (no OTP)');
+      return res.json({
+        status: true, message: 'File generated (borrowed — no OTP)', source: 'borrow',
+        data: pdfBuffer.toString('base64'), referenceId, ms: Date.now() - t0,
+      });
+    } catch (e) {
+      return sendError(req, res, e, 'borrow', { t0, referenceId });
     }
   });
 
