@@ -10,3 +10,11 @@ Thumbs.db
 
 # reference-only module (kept local; contains third-party AWS keys — never commit)
 mypropertyqr-patta-otp-mypropertyqr-dev/
+
+
+
+# delivery package (standalone duplicate — zip & submit)
+delivery/
+
+# register module local PDF store (runtime)
+.register-pdfs/

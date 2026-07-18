@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MPQR Register — EC Tester</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --dim:#94a3b8;
+          --accent:#0ea5b7; --ok:#22c55e; --err:#ef4444; --warn:#f59e0b; --quick:#8b5cf6; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  .wrap { max-width:960px; margin:0 auto; padding:20px; }
+  h1 { font-size:1.25rem; margin:0 0 4px; }
+  .sub { color:var(--dim); font-size:.85rem; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > * { flex:1 1 180px; }
+  label { display:block; font-size:.72rem; color:var(--dim); margin:10px 0 4px; text-transform:uppercase; letter-spacing:.03em; }
+  input, select { width:100%; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:#0b1220; color:var(--txt); font-size:.9rem; outline:none; }
+  input:focus, select:focus { border-color:var(--accent); }
+  button { padding:12px 18px; border:none; border-radius:8px; font-weight:700; font-size:.92rem; cursor:pointer; color:#04222a; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .quick { background:var(--quick); color:#fff; } .solve { background:var(--accent); }
+  .options { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:640px){ .options { grid-template-columns:1fr; } }
+  .opt { border:1px solid var(--line); border-radius:10px; padding:16px; background:#0b1220; }
+  .opt h3 { margin:0 0 4px; font-size:1rem; } .opt p { margin:0 0 12px; color:var(--dim); font-size:.82rem; }
+  .status { padding:10px 12px; border-radius:8px; font-size:.85rem; margin-top:12px; white-space:pre-wrap; background:#0b1220; border:1px solid var(--line); }
+  .status.ok{border-color:var(--ok)} .status.err{border-color:var(--err)} .status.warn{border-color:var(--warn)}
+  .pill { display:inline-block; font-size:.75rem; padding:3px 10px; border-radius:999px; background:#0b1220; border:1px solid var(--line); }
+  .pill.ready { border-color:var(--ok); color:var(--ok); } .pill.empty { border-color:var(--warn); color:var(--warn); }
+  img.captcha { height:52px; border-radius:6px; background:#fff; padding:2px; vertical-align:middle; }
+  iframe { width:100%; height:520px; border:1px solid var(--line); border-radius:8px; background:#fff; margin-top:12px; }
+  a.dl { color:var(--accent); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MPQR Register — EC Tester <span id="poolPill" class="pill">pool: …</span></h1>
+  <div class="sub">Encumbrance Certificate via TNREGINET. Two paths: <b>⚡ Quick EC</b> (borrow a pooled session — no typing) or <b>📝 Solve Captcha</b> (type the captcha; your session joins the pool for 30 min).</div>
+
+  <div class="card">
+    <div class="row">
+      <div><label>Zone</label><select id="zone"><option value="">—</option></select></div>
+      <div><label>District</label><select id="district" disabled><option value="">—</option></select></div>
+      <div><label>SRO</label><select id="sro" disabled><option value="">—</option></select></div>
+      <div><label>Village</label><select id="village" disabled><option value="">—</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>Survey number</label><input id="survey" placeholder="e.g. 2689" /></div>
+      <div><label>EC from (DD-MMM-YYYY)</label><input id="start" value="01-Jan-2020" /></div>
+      <div><label>EC to (DD-MMM-YYYY)</label><input id="end" value="31-Dec-2025" /></div>
+    </div>
+  </div>
+
+  <div class="options">
+    <div class="opt">
+      <h3>⚡ Quick EC</h3>
+      <p>No captcha typing. Borrows a verified session from the pool. Instant.</p>
+      <button class="quick" id="btnQuick" style="width:100%;">⚡ Quick EC</button>
+    </div>
+    <div class="opt">
+      <h3>📝 Solve Captcha</h3>
+      <p>Type the 6 characters. Your session then joins the pool for others.</p>
+      <div id="capBox" style="display:none; margin-bottom:10px;">
+        <img id="capImg" class="captcha" alt="captcha" />
+        <button class="solve" id="btnRefreshCap" style="padding:8px 10px;">↻</button>
+        <input id="capInput" placeholder="6 chars" style="margin-top:8px;" />
+      </div>
+      <button class="solve" id="btnBegin" style="width:100%;">📷 Get captcha</button>
+      <button class="solve" id="btnVerify" style="width:100%; display:none; margin-top:8px;">📝 Solve &amp; Download</button>
+    </div>
+  </div>
+
+  <div id="s" class="status">Pick the parcel, then choose a path.</div>
+  <div id="result"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const B = '/api/register';
+let sessionId = null;
+const set = (msg, k) => { $('s').className = 'status ' + (k||''); $('s').textContent = msg; };
+async function api(path, opts={}) {
+  const r = await fetch(B + path, { headers:{'Content-Type':'application/json'}, ...opts });
+  let j; try { j = await r.json(); } catch(e){ j = { ok:false, error:'bad response' }; }
+  return { code:r.status, j };
+}
+function parcel() {
+  return { zoneId:$('zone').value, districtId:$('district').value, sroId:$('sro').value,
+    villageCode:$('village').value, surveyNo:$('survey').value.trim(),
+    ecPeriodStartDt:$('start').value.trim(), ecPeriodEndDt:$('end').value.trim(), isRevenueVillage:false };
+}
+function fill(sel, list, valKey, nameKey) {
+  sel.innerHTML = '<option value="">— select —</option>' + list.map(x => `<option value="${x[valKey]}">${x[nameKey]}</option>`).join('');
+  sel.disabled = false;
+}
+
+// ── pool status pill ──
+async function refreshPool() {
+  const { j } = await api('/health');
+  const p = j.pool || { idle:0 };
+  const el = $('poolPill');
+  if (p.idle > 0) { el.className = 'pill ready'; el.textContent = `${p.idle} session(s) ready — instant`; }
+  else { el.className = 'pill empty'; el.textContent = 'pool empty — solve a captcha'; }
+}
+setInterval(refreshPool, 5000);
+
+// ── cascade ──
+async function loadZones(){ const {j}=await api('/districts'); $('zone').innerHTML='<option value="">— select —</option>'+j.zones.map(z=>`<option value="${z.zoneId}" data-d='${JSON.stringify(z.districts)}'>${z.zoneName}</option>`).join(''); }
+$('zone').onchange = () => {
+  const opt=$('zone').options[$('zone').selectedIndex]; const ds=opt&&opt.dataset.d?JSON.parse(opt.dataset.d):[];
+  fill($('district'), ds, 'districtId','districtName'); $('sro').innerHTML='<option>—</option>'; $('sro').disabled=true; $('village').innerHTML='<option>—</option>'; $('village').disabled=true;
+};
+$('district').onchange = async () => { if(!$('district').value) return; const {j}=await api('/sros?districtId='+$('district').value); fill($('sro'), j.sros||[], 'sroId','sroName'); $('village').innerHTML='<option>—</option>'; $('village').disabled=true; };
+$('sro').onchange = async () => { if(!$('sro').value) return; const {j}=await api('/villages?sroId='+$('sro').value); fill($('village'), j.villages||[], 'villageCode','villageName'); };
+
+// ── Quick EC ──
+$('btnQuick').onclick = async () => {
+  set('⚡ Borrowing a pooled session…', 'warn'); $('btnQuick').disabled=true;
+  const { code, j } = await api('/fetch', { method:'POST', body:JSON.stringify(parcel()) });
+  $('btnQuick').disabled=false;
+  if (j.ok) return showPdf(j, '⚡ Quick EC');
+  if (j.code === 'POOL_EMPTY') { set('Pool is empty — solve the captcha instead.', 'warn'); $('btnBegin').click(); return; }
+  set(`✗ ${code}: ${j.error||j.code}`, 'err');
+};
+
+// ── Solve Captcha ──
+$('btnBegin').onclick = async () => {
+  set('Fetching captcha…', 'warn');
+  const { code, j } = await api('/begin', { method:'POST', body:JSON.stringify(parcel()) });
+  if (!j.ok) return set(`✗ ${code}: ${j.error}`, 'err');
+  sessionId = j.sessionId; $('capImg').src = j.captchaImage; $('capBox').style.display='block';
+  $('btnVerify').style.display='block'; $('capInput').focus();
+  set('Type the characters shown, then Solve & Download.', '');
+};
+$('btnRefreshCap').onclick = async () => { if(!sessionId) return; const {j}=await api('/captcha/refresh',{method:'POST',body:JSON.stringify({sessionId})}); if(j.ok) $('capImg').src=j.captchaImage; };
+$('btnVerify').onclick = async () => {
+  const captcha = $('capInput').value.trim();
+  set('Verifying captcha + fetching EC…', 'warn'); $('btnVerify').disabled=true;
+  const { code, j } = await api('/verify', { method:'POST', body:JSON.stringify({ sessionId, captcha, ...parcel() }) });
+  $('btnVerify').disabled=false;
+  if (j.ok) { refreshPool(); return showPdf(j, '📝 Solved'); }
+  if (j.code === 'CAPTCHA_WRONG') { $('capImg').src = j.newCaptchaImage || $('capImg').src; $('capInput').value=''; return set('Wrong captcha — a new one loaded. Try again.', 'err'); }
+  if (j.code === 'CAPTCHA_EXPIRED') { $('capBox').style.display='none'; $('btnVerify').style.display='none'; return set('Captcha expired — click Get captcha again.', 'err'); }
+  set(`✗ ${code}: ${j.error||j.code}`, 'err');
+};
+
+function showPdf(j, label) {
+  set(`✓ ${label}: ${j.ecRecords?.length||0} record(s) · ${j.ms||0}ms · refId ${j.refId}`, 'ok');
+  const rows = (j.ecRecords||[]).map(r => `<tr><td>${r.docNumber||''}</td><td>${r.docType||''}</td><td>${r.execDate||''}</td><td>${r.parties||''}</td><td>${r.marketValue||''}</td></tr>`).join('');
+  $('result').innerHTML = `<div class="card"><table style="width:100%;font-size:.85rem;"><tr style="color:var(--dim)"><th>Doc</th><th>Type</th><th>Date</th><th>Parties</th><th>Value</th></tr>${rows}</table>
+    <div style="margin-top:10px;"><a class="dl" href="${j.pdfUrl}" target="_blank">⬇ Download EC PDF</a></div></div>`;
+}
+
+loadZones(); refreshPool();
+</script>
+</body>
+</html>

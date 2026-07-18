@@ -26,6 +26,7 @@ const tnsLive = require('../bridge/tns-live');
 const { generateMergedPdf } = require('../lib/pdf-generator');
 const { extractFmb } = require('../lib/fmb-extractor');
 const { browserStats } = require('../lib/browser-launcher');
+const register = require('../register');   // isolated /api/register/* subsystem (TNREGINET EC)
 const logger = require('../lib/logger');
 const metrics = require('../lib/metrics');
 const { classify } = require('../lib/errors');
@@ -212,6 +213,10 @@ async function main() {
     });
   });
 
+  // REGISTER module (TNREGINET EC) — mounted BEFORE the API-key gate: it is a
+  // separate subsystem with no per-user identity, so /api/register/* needs no key.
+  register.mount(app);
+
   // API-key gate. /health + the dashboard are open; everything else (incl. /metrics)
   // needs X-API-Key.
   app.use((req, res, next) => {
@@ -372,7 +377,7 @@ async function main() {
       if (patBot.busyCount() > 0) return;
       clearInterval(poll); clearTimeout(hard);
       try { server.close(() => {}); } catch (_) {}
-      Promise.resolve(patBot.shutdown()).catch(() => {}).finally(() => process.exit(0));
+      Promise.allSettled([patBot.shutdown(), register.shutdown()]).finally(() => process.exit(0));
     };
     const poll = setInterval(tryExit, 500); poll.unref();
     tryExit();
