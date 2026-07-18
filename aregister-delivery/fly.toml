@@ -1,0 +1,53 @@
+# fly.toml — MPQR A-Register (Adangal) OTP service.
+#
+# Deploy:
+#   fly apps create <your-app-name>       # first time only
+#   fly secrets set -a <your-app-name> MPQR_API_KEY=<strong-key>
+#   fly deploy --remote-only
+
+app = "mpqr-aregister"           # ← change to your app name
+primary_region = "bom"           # Mumbai — eservices.tn.gov.in requires an Indian IP
+kill_signal = "SIGINT"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  strategy = "immediate"          # bom often lacks capacity for blue-green
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3050"
+  PLAYWRIGHT_HEADLESS = "true"
+  PLAYWRIGHT_TIMEOUT_MS = "30000"
+  # Runs real headless browsers for the OTP flow. ~300 MB each; keep the cap >= warm
+  # pool + peak concurrent verifies or launches queue.
+  MPQR_MAX_CONCURRENT_BROWSERS = "5"
+  MPQR_WARM_POOL_SIZE = "2"
+  # Keep-alive OFF: the in-page ping corrupted the live govt OTP session. Leave 0.
+  MPQR_KEEPALIVE_MS = "0"
+  # RSS ceiling (MB): the memory watchdog sheds new /start above this and restarts
+  # cleanly once idle before the kernel OOM-kills. Keep under the VM's RAM.
+  MPQR_RSS_CEILING_MB = "1700"
+
+[http_service]
+  internal_port = 3050
+  force_https = true
+  auto_stop_machines = "off"      # always-on
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"                  # each live A-Register session pins one headless browser
+  cpus = 2
+  cpu_kind = "shared"

@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.local
+server.pid
+server.out.log
+server.err.log
+*.log
+.DS_Store
+Thumbs.db
+
+# reference-only module (kept local; contains third-party AWS keys — never commit)
+mypropertyqr-patta-otp-mypropertyqr-dev/

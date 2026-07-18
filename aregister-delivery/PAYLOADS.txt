@@ -1,0 +1,179 @@
+==============================================================================
+ MPQR A-REGISTER (ADANGAL) OTP API — PAYLOAD REFERENCE FOR FRONTEND
+==============================================================================
+
+Everything a frontend needs to drive the A-Register service: the endpoints, the
+exact request/response JSON, the error codes, and how to auto-read the OTP.
+
+Base URL   : https://<your-app>.fly.dev
+Auth       : every request (except GET /health) MUST send the header
+                 X-API-Key: <MPQR_API_KEY>
+Content-Type: application/json   (for all POST requests)
+
+The whole flow is 2 calls: START (send OTP) → VERIFY (submit OTP, get the PDF).
+A "referenceId" string ties them together. It is valid for ttlSeconds (~300s).
+
+
+------------------------------------------------------------------------------
+ THE FLOW (happy path)
+------------------------------------------------------------------------------
+  1. Build the parcel with the 4 cascading dropdowns (District → Taluk →
+     Village → Sub-division) using the GET /api/live/* endpoints below.
+  2. POST /api/aregister/start  → get { referenceId }. The government sends an
+     OTP to the customer's mobile.
+  3. Customer reads/auto-fills the OTP (see "OTP AUTO-READ" below).
+  4. POST /api/aregister/verify { referenceId, otp } → { data: <base64 PDF> }.
+  5. Render/download the PDF:  "data:application/pdf;base64," + data
+
+
+==============================================================================
+ 1) POST /api/aregister/start        — send the OTP
+==============================================================================
+REQUEST BODY (send government CODES from the dropdowns — fastest):
+{
+  "mobileNo":          "9597040585",     // 10 digits, starts 6-9        (required)
+  "districtCode":      "17",             // from /api/live/districts      (required)
+  "talukCode":         "08",             // from /api/live/taluks         (required)
+  "villageCode":       "090",            // from /api/live/villages       (required)
+  "nflag":             "Y",              // taluk's nflag (Y/N)           (optional, default "Y")
+  "surveyNumber":      "1",              // survey no; "489/1B" is split  (required)
+  "subDivisionNumber": "3A",             // from /api/live/subdivs        (optional, default "1")
+  "landType":          "R",              // "R" rural | "N" natham        (optional, default "R")
+  "districtName":      "Ariyalur",       // echo-only, for display        (optional)
+  "talukName":         "Andimadam",      // echo-only                     (optional)
+  "villageName":       "…",              // echo-only                     (optional)
+  "memberId":          "your-ref-123"    // your own reference, echoed back (optional)
+}
+
+ALTERNATIVE — send NAMES instead of codes (server resolves them live, slower):
+{ "mobileNo":"9597040585", "districtName":"Ariyalur", "talukName":"Andimadam",
+  "villageName":"Alagiyamanavalam", "surveyNumber":"1", "landType":"R" }
+
+SUCCESS RESPONSE (HTTP 200):
+{
+  "status": true,
+  "message": "OTP sent",
+  "referenceId": "148ed…​.9f0a…",   // OPAQUE string — pass back verbatim to verify
+  "ttlSeconds": 300,
+  "memberId": "your-ref-123"
+}
+
+ERROR RESPONSE (HTTP 4xx/5xx):
+{ "status": false, "code": "INVALID_INPUT", "message": "…", "retryable": false }
+
+
+==============================================================================
+ 2) POST /api/aregister/verify       — submit the OTP, get the A-Register PDF
+==============================================================================
+REQUEST BODY:
+{
+  "referenceId": "148ed…​.9f0a…",   // exactly as returned by /start   (required)
+  "otp":         "383347"            // 4-8 digits from the SMS          (required)
+}
+
+SUCCESS RESPONSE (HTTP 200):
+{
+  "status": true,
+  "message": "File generated successfully",
+  "data": "JVBERi0xLjQ…",           // base64-encoded PDF (the A-Register)
+  "referenceId": "148ed…​.9f0a…",
+  "memberId": "your-ref-123",
+  "ms": 1128
+}
+  → To show/download:  const url = "data:application/pdf;base64," + data;
+
+ERROR RESPONSE (HTTP 4xx/5xx): { "status": false, "code": "WRONG_OTP", "message": "…", "retryable": … }
+
+NOTE: /verify is idempotent — re-POSTing the same (referenceId, otp) returns the
+same result instead of erroring, so a network retry is safe.
+
+
+==============================================================================
+ 3) POST /api/aregister/resend       — resend the OTP on an existing reference
+==============================================================================
+REQUEST BODY : { "referenceId": "148ed…​.9f0a…" }
+SUCCESS      : { "status": true, "message": "OTP resent", "referenceId": "…", "ttlSeconds": 300 }
+
+
+==============================================================================
+ 4) GET /api/live/*                  — dropdown data (build the parcel cascade)
+==============================================================================
+GET /api/live/districts
+   → { "status": true, "districts": [ { "code":"17", "name":"Ariyalur", "tamil":"…" }, … ] }
+
+GET /api/live/taluks?district=17
+   → { "status": true, "taluks": [ { "code":"08", "name":"Andimadam", "tamil":"…", "nflag":"Y" }, … ] }
+
+GET /api/live/villages?district=17&taluk=08
+   → { "status": true, "villages": [ { "code":"090", "name":"…", "tamil":"…" }, … ] }
+
+GET /api/live/subdivs?district=17&taluk=08&village=090&survey=1&nflag=Y&landtype=R
+   → { "status": true, "subdivs": [ "1", "2A", "3A", … ] }   // strings
+
+Cascade order: pick district → load taluks → pick taluk (keep its nflag) → load
+villages → pick village → type survey → load subdivs → pick subdiv. Then call START
+with the chosen codes (+ the taluk's nflag).
+
+
+==============================================================================
+ 5) GET /health                      — liveness (no API key)
+==============================================================================
+{ "ok": true, "service": "mpqr-aregister", "warmPool": {…}, "pending": 0, … }
+
+
+==============================================================================
+ ERROR CODES  (field: "code")
+==============================================================================
+ UNAUTHORIZED        401  Missing/wrong X-API-Key header.
+ INVALID_INPUT       400  Bad/missing field (mobile, referenceId, otp, parcel).
+ WRONG_OTP           400  OTP incorrect — let the user retype (session still live).
+ SESSION_EXPIRED     400  Govt page expired before acceptance — call START again.
+ VERIFY_EXPIRED      400  referenceId expired/unknown — call START again.
+ CHITTA_UNAVAILABLE  422  OTP ok but the govt returned no A-Register for the parcel
+                          (wrong survey/sub-div, or try the other land type).
+ RATE_LIMITED        429  Daily OTP limit for that mobile reached.
+ OTP_SEND_FAILED     502  Govt did not send the OTP — retryable.
+ GOVT_DOWN           503  Government portal unavailable — retryable.
+ GOVT_TIMEOUT        504  Government portal timed out — retryable.
+ SHEDDING            503  Server draining/overloaded — retry shortly.
+ INTERNAL            500  Unexpected server error.
+"retryable": true means a fresh attempt may succeed. WRONG_OTP → retype (no new
+START). SESSION_EXPIRED/VERIFY_EXPIRED → start over.
+
+
+==============================================================================
+ OTP AUTO-READ (so the customer doesn't type it)
+==============================================================================
+The OTP SMS is sent by the GOVERNMENT (not your domain), so browser Web OTP API
+(navigator.credentials otp) will NOT auto-fill it. Two things that DO help:
+
+ • WEB (any browser): put  autocomplete="one-time-code" inputmode="numeric"  on
+   the OTP <input>. iOS Safari + Android Chrome then SUGGEST the code from the SMS
+   above the keyboard (one tap). Already set on the included tester (public/areg.html).
+
+ • ANDROID app (recommended): use the SMS User Consent API to read the OTP with a
+   single "Allow" tap and no SMS permission. A ready-to-use Kotlin helper +
+   instructions are in  otp-reader-android/  (OtpAutoReader.kt + README.md).
+   Flow: START → begin SMS User Consent → on the SMS, regex out the 4-8 digits →
+   auto-call VERIFY.
+
+
+==============================================================================
+ MINIMAL FRONTEND PSEUDO-CODE
+==============================================================================
+ const H = { 'Content-Type':'application/json', 'X-API-Key': API_KEY };
+
+ // 1) start
+ const s = await (await fetch(BASE+'/api/aregister/start', {
+   method:'POST', headers:H, body: JSON.stringify(parcelWithCodes) })).json();
+ if (!s.status) return showError(s.code, s.message);
+ const referenceId = s.referenceId;
+
+ // 2) get OTP (typed, or auto-read on Android), then verify
+ const v = await (await fetch(BASE+'/api/aregister/verify', {
+   method:'POST', headers:H, body: JSON.stringify({ referenceId, otp }) })).json();
+ if (!v.status) return showError(v.code, v.message);
+
+ // 3) show the PDF
+ const url = 'data:application/pdf;base64,' + v.data;   // <iframe src=url> or <a download>
+==============================================================================

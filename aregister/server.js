@@ -153,7 +153,7 @@ async function main() {
   app.use((req, res, next) => {
     if (req.path === '/health') return next();
     const key = req.headers['x-api-key'] || req.query.api_key;
-    if (key !== API_KEY) return res.status(401).json({ status: false, message: 'unauthorized' });
+    if (key !== API_KEY) return res.status(401).json({ status: false, code: 'UNAUTHORIZED', message: 'unauthorized', retryable: false });
     next();
   });
 
@@ -162,12 +162,12 @@ async function main() {
     const t0 = Date.now();
     const p = req.body || {};
     if (shuttingDown || shedding) {
-      return res.status(503).set('Retry-After', '5').json({ status: false, code: 'SHEDDING', message: 'Server busy, please retry shortly' });
+      return res.status(503).set('Retry-After', '5').json({ status: false, code: 'SHEDDING', message: 'Server busy, please retry shortly', retryable: true });
     }
     try {
       const mobile = String(p.mobileNo || p.mobile || '').trim();
       if (!/^[6-9]\d{9}$/.test(mobile)) {
-        return res.status(400).json({ status: false, code: 'INVALID_INPUT', message: 'Valid 10-digit mobileNo required' });
+        return res.status(400).json({ status: false, code: 'INVALID_INPUT', message: 'Valid 10-digit mobileNo required', retryable: false });
       }
       const { out, parcel } = await govtStart.fire(mobile, p);
       const referenceId = makeRefId(out.pendingId);
@@ -186,7 +186,7 @@ async function main() {
     try {
       const otp = String(b.otp || '').trim();
       if (!referenceId || !/^\d{4,8}$/.test(otp)) {
-        return res.status(400).json({ status: false, code: 'INVALID_INPUT', message: 'referenceId and a 4-8 digit otp are required' });
+        return res.status(400).json({ status: false, code: 'INVALID_INPUT', message: 'referenceId and a 4-8 digit otp are required', retryable: false });
       }
       const { machineId, pendingId } = parseRefId(referenceId);
       if (machineId && machineId !== MACHINE_ID && machineId !== 'local') {
