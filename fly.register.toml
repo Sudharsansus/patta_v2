@@ -1,0 +1,56 @@
+# fly.toml — SEPARATE Fly app for the REGISTER (TNREGINET EC) service.
+# Same Docker image as patta, but a different entry point (register/server.js) and
+# its own app/machine — fully isolated from mpqr-pat-bot.
+#
+# Deploy:
+#   fly apps create mpqr-register        # first time only
+#   fly deploy -c fly.register.toml --remote-only --strategy immediate
+
+app = "mpqr-register"
+primary_region = "bom"           # Mumbai — TNREGINET firewalls non-IN IPs
+kill_signal = "SIGINT"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Run the REGISTER entry instead of the patta one (overrides the image CMD).
+[processes]
+  app = "node register/server.js"
+
+[deploy]
+  strategy = "immediate"          # bom often lacks capacity for blue-green
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3040"
+  PLAYWRIGHT_HEADLESS = "true"
+  PLAYWRIGHT_TIMEOUT_MS = "30000"
+  MPQR_MAX_CONCURRENT_BROWSERS = "4"
+  # TEST MODE for the first check: the /ec UI + pool + Quick-EC flow work with fake
+  # EC data (no real TNREGINET yet). Flip to 0 once the live TNREGINET flow is tuned.
+  MPQR_TEST_MODE = "1"
+  # Register pool
+  REGISTER_POOL_MAX_AGE_MS = "1800000"
+  CAPTCHA_MODE = "hitl"
+
+[http_service]
+  internal_port = 3040
+  force_https = true
+  auto_stop_machines = "off"      # always-on
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"                  # test mode launches no browsers; bump to 2gb for live TNREGINET
+  cpus = 1
+  cpu_kind = "shared"
