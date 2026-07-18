@@ -33,6 +33,8 @@ kill_timeout = "30s"
   # Register pool
   REGISTER_POOL_MAX_AGE_MS = "1800000"
   CAPTCHA_MODE = "hitl"
+  # /app is root-owned; the app runs as pwuser → write PDFs to a writable path.
+  LOCAL_PDF_DIR = "/tmp/register-pdfs"
 
 [http_service]
   internal_port = 3040

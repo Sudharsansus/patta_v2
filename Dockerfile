@@ -18,6 +18,7 @@ COPY bot ./bot
 COPY bridge ./bridge
 COPY data ./data
 COPY public ./public
+COPY register ./register
 
 ENV NODE_ENV=production \
     PLAYWRIGHT_HEADLESS=true \
@@ -32,7 +33,7 @@ ENV NODE_ENV=production \
 
 EXPOSE 3030
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fsS http://localhost:3030/health || exit 1
+  CMD curl -fsS http://localhost:${PORT:-3030}/health || exit 1
 
 ENTRYPOINT ["/bin/sh", "-c", "exec runuser -u pwuser -- \"$@\"", "sh"]
 CMD ["node", "bot/server.js"]
