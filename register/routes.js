@@ -56,7 +56,7 @@ function build() {
   }));
 
   // ── 2-6) dropdowns ─────────────────────────────────────────────────────────
-  router.get('/districts', wrap(async (req, res) => res.json({ ok: true, zones: dropdowns.getZones(req.query.zone) })));
+  router.get('/districts', wrap(async (req, res) => res.json({ ok: true, zones: await dropdowns.getZones(req.query.zone) })));
   router.get('/sros', wrap(async (req, res) => {
     if (!req.query.districtId) return res.status(400).json({ ok: false, error: 'districtId required' });
     res.json({ ok: true, sros: await dropdowns.getSros(req.query.districtId) });
