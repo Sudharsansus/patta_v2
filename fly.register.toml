@@ -35,6 +35,8 @@ kill_timeout = "30s"
   CAPTCHA_MODE = "hitl"
   # /app is root-owned; the app runs as pwuser → write PDFs to a writable path.
   LOCAL_PDF_DIR = "/tmp/register-pdfs"
+  # Districts are static; taluks/villages come from the patta service's live cache.
+  PATTA_LIVE_URL = "https://mpqr-pat-bot.fly.dev"
 
 [http_service]
   internal_port = 3040

@@ -3,81 +3,88 @@
 /**
  * Register location dropdowns.
  *
- * Districts + revenue Taluks + revenue Villages come LIVE from the same government
- * source the patta service uses (bridge/tns-live.js → eservices.tn.gov.in), which
- * is already reverse-engineered and working. Only the SRO / registration-village
- * lists are TNREGINET-specific and remain stubbed until that portal is live-tuned.
+ * Districts are STATIC (the 38 TN districts grouped into the 4 TNREGINET zones —
+ * reference data that never changes, so no fetch, instant + reliable).
  *
- * Cached in-memory (districts 6h, taluks/villages 1h).
+ * Revenue Taluks + Villages come from the PATTA service's already-live, cached
+ * /api/live/* endpoints over HTTP — so the register process runs NO government
+ * browser of its own (it was cold/flaky on the small register VM). Cached here too.
+ *
+ * SRO + registration-village lists are TNREGINET-specific and remain stubbed until
+ * that portal is live-tuned.
  */
+const axios = require('axios');
 const config = require('./config');
-const tnsLive = require('../bridge/tns-live');
 
-// District → TNREGINET zone assignment (district NAMES come live; this only groups).
-const ZONE_DEF = {
-  1: { name: 'Chennai',    codes: ['01', '02', '03', '35', '04', '37', '36', '06', '07', '33', '05', '31'] },
-  2: { name: 'Coimbatore', codes: ['12', '32', '10', '08', '09', '11'] },
-  3: { name: 'Madurai',    codes: ['24', '25', '13', '26', '27', '23', '28', '29', '34', '30'] },
-  4: { name: 'Trichy',     codes: ['15', '14', '16', '17', '22', '21', '20', '19', '38', '18'] },
-};
-const _zoneOf = {};
-for (const [zid, z] of Object.entries(ZONE_DEF)) for (const c of z.codes) _zoneOf[c] = zid;
-const pad2 = (c) => String(c == null ? '' : c).padStart(2, '0');
+const PATTA_URL = (process.env.PATTA_LIVE_URL || 'https://mpqr-pat-bot.fly.dev').replace(/\/$/, '');
+const PATTA_KEY = process.env.PATTA_API_KEY || process.env.MPQR_API_KEY || '';
+
+// 38 districts, grouped into the 4 TNREGINET zones. codes = TN district numbers.
+const ZONES = [
+  { zoneId: '1', zoneName: 'Chennai', districts: [
+    ['01', 'Chennai'], ['02', 'Tiruvallur'], ['03', 'Kancheepuram'], ['35', 'Chengalpattu'],
+    ['04', 'Vellore'], ['37', 'Ranipet'], ['36', 'Thirupathur'], ['06', 'Tiruvannamalai'],
+    ['07', 'Viluppuram'], ['33', 'Kallakurichi'], ['05', 'Dharmapuri'], ['31', 'Krishnagiri'],
+  ] },
+  { zoneId: '2', zoneName: 'Coimbatore', districts: [
+    ['12', 'Coimbatore'], ['32', 'Tiruppur'], ['10', 'Erode'], ['08', 'Salem'], ['09', 'Namakkal'], ['11', 'Nilgiris'],
+  ] },
+  { zoneId: '3', zoneName: 'Madurai', districts: [
+    ['24', 'Madurai'], ['25', 'Theni'], ['13', 'Dindigul'], ['26', 'Virudhunagar'], ['27', 'Ramanathapuram'],
+    ['23', 'Sivagangai'], ['28', 'Thoothukkudi'], ['29', 'Tirunelveli'], ['34', 'Tenkasi'], ['30', 'Kanniyakumari'],
+  ] },
+  { zoneId: '4', zoneName: 'Trichy', districts: [
+    ['15', 'Trichy'], ['14', 'Karur'], ['16', 'Perambalur'], ['17', 'Ariyalur'], ['22', 'Pudukkottai'],
+    ['21', 'Thanjavur'], ['20', 'Thiruvarur'], ['19', 'Nagapattinam'], ['38', 'Mayiladuthurai'], ['18', 'Cuddalore'],
+  ] },
+].map((z) => ({
+  zoneId: z.zoneId, zoneName: z.zoneName,
+  districts: z.districts.map(([districtId, districtName]) => ({ districtId, districtName }))
+    .sort((a, b) => a.districtName.localeCompare(b.districtName)),
+}));
 
 const _cache = new Map();
 const cget = (k) => { const e = _cache.get(k); return e && Date.now() - e.at < e.ttl ? e.val : null; };
 const cset = (k, v, ttl) => { _cache.set(k, { at: Date.now(), ttl, val: v }); return v; };
 
-/** All 38 districts LIVE, grouped into the 4 zones. */
+async function _pattaLive(path) {
+  const r = await axios.get(PATTA_URL + path, {
+    headers: { 'X-API-Key': PATTA_KEY }, timeout: 60000, validateStatus: () => true,
+  });
+  return r.data || {};
+}
+
+// Static — instant, reliable.
 async function getZones(zoneFilter) {
-  let zones = cget('zones');
-  if (!zones) {
-    let districts = [];
-    try { districts = await tnsLive.getDistricts(); } catch (_) {}
-    const byZone = { 1: [], 2: [], 3: [], 4: [] };
-    for (const d of districts) {
-      const zid = _zoneOf[pad2(d.code)];
-      if (zid) byZone[zid].push({ districtId: d.code, districtName: d.name, tamil: d.tamil });
-    }
-    zones = Object.entries(ZONE_DEF).map(([zid, z]) => ({
-      zoneId: zid, zoneName: z.name,
-      districts: byZone[zid].sort((a, b) => a.districtName.localeCompare(b.districtName)),
-    }));
-    if (districts.length) zones = cset('zones', zones, 6 * 60 * 60 * 1000);
-  }
-  return zoneFilter ? zones.filter((z) => z.zoneId === String(zoneFilter)) : zones;
+  return zoneFilter ? ZONES.filter((z) => z.zoneId === String(zoneFilter)) : ZONES;
 }
-
-/** Flat "all districts" list (LIVE) — convenience for callers that don't want zones. */
 async function getDistricts() {
-  const zones = await getZones();
-  return zones.flatMap((z) => z.districts.map((d) => ({ ...d, zoneId: z.zoneId, zoneName: z.zoneName })));
+  return ZONES.flatMap((z) => z.districts.map((d) => ({ ...d, zoneId: z.zoneId, zoneName: z.zoneName })));
 }
 
-/** Revenue taluks for a district (LIVE). talukId encodes district+code+nflag. */
+// Revenue taluks — LIVE via the patta service. talukId encodes district+code+nflag.
 async function getRevTaluks(districtId) {
   const ck = 'rtlk:' + districtId; const c = cget(ck); if (c) return c;
   let taluks = [];
-  try { taluks = await tnsLive.getTaluks(districtId); } catch (_) {}
+  try { taluks = (await _pattaLive('/api/live/taluks?district=' + encodeURIComponent(districtId))).taluks || []; } catch (_) {}
   const out = taluks.map((t) => ({
     talukId: `${districtId}_${t.code}_${t.nflag || 'Y'}`, talukName: t.name, tamil: t.tamil, nflag: t.nflag || 'Y',
   }));
   return out.length ? cset(ck, out, 60 * 60 * 1000) : out;
 }
 
-/** Revenue villages for a taluk (LIVE). Decodes the districtId from talukId. */
+// Revenue villages — LIVE via the patta service.
 async function getRevVillages(talukId) {
   const ck = 'rvill:' + talukId; const c = cget(ck); if (c) return c;
   const [districtId, talukCode] = String(talukId || '').split('_');
   if (!districtId || !talukCode) return [];
   let villages = [];
-  try { villages = await tnsLive.getVillages(districtId, talukCode); } catch (_) {}
+  try { villages = (await _pattaLive(`/api/live/villages?district=${encodeURIComponent(districtId)}&taluk=${encodeURIComponent(talukCode)}`)).villages || []; } catch (_) {}
   const out = villages.map((v) => ({ villageCode: v.code, villageName: v.name, tamil: v.tamil }));
   return out.length ? cset(ck, out, 60 * 60 * 1000) : out;
 }
 
-// SRO + registration-village lists are TNREGINET-specific (not on eservices) —
-// stubbed (canned in test mode) until the TNREGINET combos are live-tuned.
+// SRO + registration-village lists are TNREGINET-specific — stubbed until tuned.
 async function getSros(_districtId) { return config.testMode ? [{ sroId: '20051', sroName: 'Ariyalur Joint I' }, { sroId: '20053', sroName: 'Andimadam' }] : []; }
 async function getVillages(_sroId) { return config.testMode ? [{ villageCode: '63089', villageName: 'Alagiyamanavalam' }] : []; }
 
