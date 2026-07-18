@@ -157,12 +157,16 @@ function fill(sel, list) {
 function resetSubdiv(msg) { $('subdiv').innerHTML = `<option value="">${msg || '—'}</option>`; $('subdiv').disabled = true; }
 
 $('district').onchange = async () => {
-  $('taluk').innerHTML = '<option>…</option>'; $('taluk').disabled = true;
+  $('taluk').innerHTML = '<option>loading… (first load ~20s)</option>'; $('taluk').disabled = true;
   $('village').innerHTML = '<option>—</option>'; $('village').disabled = true;
   resetSubdiv('— enter survey —');
   if (!$('district').value) return;
-  const { json } = await api('/api/live/taluks?district=' + $('district').value);
-  fill($('taluk'), json.taluks || []);
+  const { ok, json } = await api('/api/live/taluks?district=' + $('district').value);
+  if (!ok || !(json.taluks && json.taluks.length)) {
+    $('taluk').innerHTML = '<option value="">— could not load —</option>';
+    return setStatus($('s1'), 'Taluks did not load: ' + (json.message || 'try selecting the district again'), 'err');
+  }
+  fill($('taluk'), json.taluks);
 };
 $('taluk').onchange = async () => {
   $('village').innerHTML = '<option>…</option>'; $('village').disabled = true;
@@ -264,11 +268,15 @@ async function bLoadDistricts() {
 }
 function bResetSub(msg) { $('bsub').innerHTML = `<option value="">${msg || '— enter survey —'}</option>`; $('bsub').disabled = true; }
 $('bd').onchange = async () => {
-  $('bt').innerHTML = '<option>…</option>'; $('bt').disabled = true;
+  $('bt').innerHTML = '<option>loading…</option>'; $('bt').disabled = true;
   $('bv').innerHTML = '<option>—</option>'; $('bv').disabled = true; bResetSub();
   if (!$('bd').value) return;
-  const { json } = await api('/api/live/taluks?district=' + $('bd').value);
-  fill($('bt'), json.taluks || []);
+  const { ok, json } = await api('/api/live/taluks?district=' + $('bd').value);
+  if (!ok || !(json.taluks && json.taluks.length)) {
+    $('bt').innerHTML = '<option value="">— could not load —</option>';
+    return setStatus($('s3'), 'Taluks did not load: ' + (json.message || 'try again'), 'err');
+  }
+  fill($('bt'), json.taluks);
 };
 $('bt').onchange = async () => {
   $('bv').innerHTML = '<option>…</option>'; $('bv').disabled = true; bResetSub();

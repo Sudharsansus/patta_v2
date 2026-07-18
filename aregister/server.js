@@ -289,6 +289,16 @@ async function main() {
   });
   server.on('error', (e) => { console.error('[areg] listen failed:', e.message); process.exit(1); });
 
+  // Keep the patta dropdown data-browser warm so District→Taluk→Village loads stay
+  // fast (~0.5s). Left idle it cold-starts (~25s) and the taluk dropdown looks stuck.
+  const keepDropdownsWarm = () => {
+    pattaLive('/api/live/districts').catch(() => {});
+    pattaLive('/api/live/taluks?district=01').catch(() => {});
+  };
+  setTimeout(keepDropdownsWarm, 4000);
+  const warmTimer = setInterval(keepDropdownsWarm, 8 * 60 * 1000);
+  if (warmTimer.unref) warmTimer.unref();
+
   // ── Graceful, drain-correct shutdown (identical policy to patta) ──────────
   const drainAndExit = (sig) => {
     if (shuttingDown) return;
