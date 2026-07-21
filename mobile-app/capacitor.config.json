@@ -1,0 +1,8 @@
+{
+  "appId": "com.mypropertyqr.landrecords",
+  "appName": "MyPropertyQR",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
