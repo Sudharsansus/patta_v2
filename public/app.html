@@ -59,6 +59,14 @@
   .pdfview { margin-top:12px; max-height:66vh; overflow:auto; -webkit-overflow-scrolling:touch;
              background:#fff; border:1px solid var(--line); border-radius:12px; padding:6px; }
   .pdfpage { display:block; margin:0 auto 8px; border-radius:4px; box-shadow:0 1px 5px rgba(0,0,0,.2); }
+  .recent { margin-top:18px; }
+  .recent-h { font-size:.72rem; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin:0 2px 8px; }
+  .rec { display:flex; align-items:center; gap:12px; padding:13px; border-radius:14px; border:1px solid var(--line); background:var(--card); margin-bottom:10px; cursor:pointer; transition:transform .08s; }
+  .rec:active { transform:scale(.99); }
+  .rec .ric { width:38px; height:38px; border-radius:10px; display:grid; place-items:center; font-size:16px; font-weight:800; flex:0 0 auto; color:#04121a; }
+  .rec .ric.patta { background:var(--patta); } .rec .ric.areg { background:var(--areg); color:#fff; }
+  .rec .rtx { flex:1; min-width:0; } .rec .rtx .t { font-weight:700; font-size:.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rec .rtx .d { color:var(--dim); font-size:.78rem; margin-top:2px; }
   .step { font-size:.72rem; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
   footer { text-align:center; color:var(--dim); font-size:.72rem; margin-top:22px; }
 </style>
@@ -90,7 +98,8 @@
         <div class="arrow">›</div>
       </div>
     </div>
-    <footer>Powered by MyPropertyQR · OTP sent to the property owner's mobile</footer>
+    <div id="recent" class="recent hidden"></div>
+    <footer>Powered by MyPropertyQR · build v2 · in-app viewer + 24h saved copies</footer>
   </div>
 
   <!-- FLOW -->
@@ -124,11 +133,13 @@
 
     <!-- Step 2 -->
     <div class="card hidden" id="s2card">
-      <div class="step">Step 2 · Enter the OTP</div>
-      <label>OTP (from the SMS)</label>
-      <input id="otp" type="tel" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="4–8 digits" />
-      <button class="go" id="btnVerify">Verify &amp; Download</button>
-      <button class="go ghost" id="btnResend" style="margin-top:8px">Resend OTP</button>
+      <div id="otpArea">
+        <div class="step">Step 2 · Enter the OTP</div>
+        <label>OTP (from the SMS)</label>
+        <input id="otp" type="tel" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="4–8 digits" />
+        <button class="go" id="btnVerify">Verify &amp; Download</button>
+        <button class="go ghost" id="btnResend" style="margin-top:8px">Resend OTP</button>
+      </div>
       <div id="st2" class="status muted">Waiting for the OTP…</div>
       <div id="result"></div>
     </div>
@@ -158,6 +169,52 @@ const nameOf = (s) => s.options[s.selectedIndex] ? (s.options[s.selectedIndex].d
 const ACC = { patta:'#0ea5b7', aregister:'#8b5cf6' };
 const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('vendor/pdfjs/pdf.worker.min.js', document.baseURI).href;
+
+// ── 24h on-device cache: re-view a fetched patta / A-Register WITHOUT spending another OTP.
+// The PDF the user already unlocked with a valid OTP is kept on THEIR device for 24h.
+// It never serves a fresh doc without OTP, so the government's owner-OTP is not bypassed.
+const CACHE_K = 'mpqr_cache_v1', CACHE_TTL = 24*60*60*1000;
+function cacheAll(){ try { return JSON.parse(localStorage.getItem(CACHE_K)||'[]').filter(e => Date.now()-e.ts < CACHE_TTL); } catch(_){ return []; } }
+function cacheWrite(list){ try { localStorage.setItem(CACHE_K, JSON.stringify(list.slice(0,5))); return true; } catch(_){ try { localStorage.setItem(CACHE_K, JSON.stringify(list.slice(0,2))); return true; } catch(__){ return false; } } }
+const esc = (s) => String(s==null?'':s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+function ago(ts){ const m=Math.floor((Date.now()-ts)/60000); if(m<1) return 'just now'; if(m<60) return m+'m ago'; return Math.floor(m/60)+'h ago'; }
+function currentParcel(){
+  return { district:$('district').value, taluk:$('taluk').value, village:$('village').value,
+    survey:$('survey').value.trim(), subdiv:$('subdiv').value.trim(),
+    landtype:(document.querySelector('input[name=lt]:checked')||{}).value||'R', villageName:nameOf($('village')) };
+}
+function ckey(doc,p){ return [doc,p.district,p.taluk,p.village,(p.survey||'').toLowerCase(),p.subdiv,p.landtype].join('|'); }
+function parcelLabel(p){ return 'S.No ' + p.survey + (p.subdiv? '/'+p.subdiv : '') + ' · ' + (p.villageName||p.village); }
+function cachePut(doc,p,base64){ let l=cacheAll().filter(e=>e.key!==ckey(doc,p)); l.unshift({ key:ckey(doc,p), doc, label:parcelLabel(p), data:base64, ts:Date.now() }); return cacheWrite(l); }
+function cacheFind(doc,p){ return cacheAll().find(e=>e.key===ckey(doc,p)); }
+function renderRecent(){
+  const list = cacheAll(); cacheWrite(list);
+  const box = $('recent'); if(!box) return;
+  if(!list.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="recent-h">Saved · view again, no OTP</div>' + list.map((e)=>
+    `<div class="rec" data-key="${esc(e.key)}">
+       <div class="ric ${e.doc==='patta'?'patta':'areg'}">${e.doc==='patta'?'P':'A'}</div>
+       <div class="rtx"><div class="t">${esc(e.label)}</div><div class="d">${e.doc==='patta'?'Patta / Chitta':'A-Register'} · ${ago(e.ts)}</div></div>
+       <div class="arrow">›</div>
+     </div>`).join('');
+  // Key-stable click binding — never open by positional index (a pruned entry would shift indices).
+  box.querySelectorAll('.rec').forEach(el => el.onclick = () => openCachedByKey(el.getAttribute('data-key')));
+}
+function openCachedByKey(key){ openCachedEntry(cacheAll().find(x => x.key === key)); }
+function openCachedEntry(e){
+  if(!e) return;
+  DOC = e.doc; REF = '';
+  document.documentElement.style.setProperty('--acc', ACC[e.doc]);
+  $('home').classList.add('hidden'); $('flow').classList.remove('hidden');
+  $('badge').className = 'badge ' + (e.doc==='patta'?'patta':'areg');
+  $('badge').textContent = e.doc==='patta' ? 'PATTA' : 'A-REGISTER';
+  $('flowTitle').textContent = e.doc==='patta' ? 'Patta / Chitta' : 'A-Register';
+  $('s1card').classList.add('hidden'); $('s2card').classList.remove('hidden'); $('otpArea').classList.add('hidden');
+  setSt($('st2'), '✓ Saved copy · no OTP used (' + ago(e.ts) + ')', 'ok');
+  deliverPdf(e.data, (e.doc==='patta'?'patta':'aregister')+'.pdf', $('st2'));
+}
+function viewCurrentSaved(){ openCachedEntry(cacheFind(DOC, currentParcel())); }
 
 // Auto-retry transient government blips (GOVT_DOWN / timeout / shedding) so the user
 // doesn't see "portal unavailable" for something a retry fixes.
@@ -273,7 +330,7 @@ async function openExternal(base64, filename, statusEl){
   }
 }
 
-function goHome(){ $('flow').classList.add('hidden'); $('home').classList.remove('hidden'); }
+function goHome(){ $('flow').classList.add('hidden'); $('home').classList.remove('hidden'); renderRecent(); }
 function openFlow(doc){
   DOC = doc; REF = '';
   document.documentElement.style.setProperty('--acc', ACC[doc]);
@@ -283,6 +340,7 @@ function openFlow(doc){
   $('flowTitle').textContent = doc==='patta' ? 'Patta / Chitta' : 'A-Register';
   $('btnStart').style.background = ACC[doc];
   $('btnVerify').style.background = ACC[doc];
+  $('s1card').classList.remove('hidden'); $('otpArea').classList.remove('hidden');
   $('s2card').classList.add('hidden'); $('result').innerHTML=''; $('otp').value='';
   setSt($('st1'), 'Fill the details, then Send OTP.', 'muted');
   loadDistricts();
@@ -324,11 +382,9 @@ async function loadSub(){
   $('subdiv').innerHTML='<option value="">— select —</option>'+subs.map(x=>`<option value="${x}">${x}</option>`).join(''); $('subdiv').disabled=false;
 }
 
-// ── Step 1: send OTP ──
-$('btnStart').onclick = async () => {
+// ── Step 1: send OTP — but first offer the saved copy so no OTP is wasted on a repeat ──
+async function doSendOtp(){
   const m=$('mobile').value.trim();
-  if(!/^[6-9]\d{9}$/.test(m)) return setSt($('st1'),'Enter a valid 10-digit mobile number.','err');
-  if(!nameOf($('village'))) return setSt($('st1'),'Pick district → taluk → village.','err');
   const to=$('taluk').options[$('taluk').selectedIndex];
   const payload={ mobileNo:m, districtCode:$('district').value, talukCode:$('taluk').value, villageCode:$('village').value,
     nflag:(to&&to.dataset.nflag)||'Y', districtName:nameOf($('district')), talukName:nameOf($('taluk')), villageName:nameOf($('village')),
@@ -338,8 +394,24 @@ $('btnStart').onclick = async () => {
   const { ok, j } = await apiRetry(`/api/${DOC}/start`, { method:'POST', body:JSON.stringify(payload) },
     (n) => setSt($('st1'), spin(`Government portal busy — retrying (${n})…`), 'warn'));
   $('btnStart').disabled=false;
-  if(ok&&j.status){ REF=j.referenceId; setSt($('st1'),`✓ OTP sent to ${m} (${Date.now()-t}ms)`,'ok'); $('s2card').classList.remove('hidden'); setSt($('st2'),'Enter the OTP from the SMS.','muted'); $('otp').focus(); $('s2card').scrollIntoView({behavior:'smooth'}); }
+  if(ok&&j.status){ REF=j.referenceId; setSt($('st1'),`✓ OTP sent to ${m} (${Date.now()-t}ms)`,'ok'); $('s2card').classList.remove('hidden'); $('otpArea').classList.remove('hidden'); setSt($('st2'),'Enter the OTP from the SMS.','muted'); $('otp').focus(); $('s2card').scrollIntoView({behavior:'smooth'}); }
   else setSt($('st1'),`✗ ${j.message||j.code||'failed'}`,'err');
+}
+$('btnStart').onclick = () => {
+  const m=$('mobile').value.trim();
+  if(!/^[6-9]\d{9}$/.test(m)) return setSt($('st1'),'Enter a valid 10-digit mobile number.','err');
+  if(!nameOf($('village'))) return setSt($('st1'),'Pick district → taluk → village.','err');
+  const cached = cacheFind(DOC, currentParcel());
+  if(cached){
+    setSt($('st1'),
+      `You already downloaded this ${ago(cached.ts)} — view it again <b>without using an OTP</b>?
+       <div class="pdfbar" style="margin-top:10px">
+         <button class="go" style="background:var(--ok);color:#04140a" onclick="viewCurrentSaved()">View saved copy</button>
+         <button class="go ghost" onclick="doSendOtp()">Send new OTP</button>
+       </div>`, 'warn');
+    return;
+  }
+  doSendOtp();
 };
 
 // ── Step 2: verify → PDF ──
@@ -352,7 +424,8 @@ $('btnVerify').onclick = async () => {
     (n) => setSt($('st2'), spin(`Government portal busy — retrying (${n})…`), 'warn'));
   $('btnVerify').disabled=false;
   if(ok&&j.status&&j.data){
-    setSt($('st2'),`✓ Ready (${Date.now()-t}ms · ${Math.round(j.data.length*0.75/1024)} KB)`,'ok');
+    let saved=false; try { saved = cachePut(DOC, currentParcel(), j.data); } catch(_){}
+    setSt($('st2'),`✓ Ready (${Date.now()-t}ms · ${Math.round(j.data.length*0.75/1024)} KB)${saved?' · saved 24h':''}`,'ok');
     const fn=(DOC==='patta'?'patta':'aregister')+'.pdf';
     await deliverPdf(j.data, fn, $('st2'));
   } else setSt($('st2'),`✗ ${j.message||j.code||'failed'}`,'err');
@@ -362,6 +435,9 @@ $('btnResend').onclick = async () => {
   const { j } = await api(`/api/${DOC}/resend`, { method:'POST', body:JSON.stringify({ referenceId:REF }) });
   setSt($('st2'), j.status?'OTP resent.':('Resend failed: '+(j.message||'')), j.status?'ok':'err');
 };
+
+// Show saved (≤24h) copies on the home screen at startup.
+renderRecent();
 </script>
 </body>
 </html>
