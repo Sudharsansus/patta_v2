@@ -54,6 +54,11 @@
   @keyframes sp { to { transform:rotate(360deg); } }
   iframe { width:100%; height:64vh; border:1px solid var(--line); border-radius:12px; background:#fff; margin-top:12px; }
   a.dl { display:block; text-align:center; padding:14px; border-radius:14px; background:var(--ok); color:#04140a; font-weight:800; text-decoration:none; margin-top:12px; }
+  .pdfbar { display:flex; gap:10px; margin-top:14px; }
+  .pdfbar .go { margin-top:0; flex:1; }
+  .pdfview { margin-top:12px; max-height:66vh; overflow:auto; -webkit-overflow-scrolling:touch;
+             background:#fff; border:1px solid var(--line); border-radius:12px; padding:6px; }
+  .pdfpage { display:block; margin:0 auto 8px; border-radius:4px; box-shadow:0 1px 5px rgba(0,0,0,.2); }
   .step { font-size:.72rem; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
   footer { text-align:center; color:var(--dim); font-size:.72rem; margin-top:22px; }
 </style>
@@ -129,6 +134,7 @@
     </div>
   </div>
 
+<script src="vendor/pdfjs/pdf.min.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const BASE = () => (window.MPQR.BACKEND || '').replace(/\/$/, '');
@@ -151,6 +157,7 @@ const spin = (t) => `<span class="spin"></span>${t}`;
 const nameOf = (s) => s.options[s.selectedIndex] ? (s.options[s.selectedIndex].dataset.name||'') : '';
 const ACC = { patta:'#0ea5b7', aregister:'#8b5cf6' };
 const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('vendor/pdfjs/pdf.worker.min.js', document.baseURI).href;
 
 // Auto-retry transient government blips (GOVT_DOWN / timeout / shedding) so the user
 // doesn't see "portal unavailable" for something a retry fixes.
@@ -165,25 +172,105 @@ async function apiRetry(path, opts, onWait, tries = 3) {
   }
 }
 
-// Deliver the PDF: on the native app, save + open it in the device's PDF viewer
-// (WebView can't render PDF inline); on the web, download link + inline preview.
+// Deliver the PDF: render it INSIDE the app with PDF.js (works offline in the WebView),
+// with a Download button + an optional "Open in…" — no auto-redirect to the share sheet.
 async function deliverPdf(base64, filename, statusEl) {
-  if (isNative()) {
+  const res = $('result');
+  res.innerHTML =
+    `<div class="pdfbar">
+       <button class="go" id="btnDl">⬇ Download</button>
+       <button class="go ghost" id="btnOpen">Open in…</button>
+     </div>
+     <div id="pdfView" class="pdfview"><div class="muted" style="padding:22px;text-align:center">${spin('Rendering preview…')}</div></div>`;
+  $('btnDl').style.background = ACC[DOC];
+  $('btnDl').onclick   = () => savePdf(base64, filename, statusEl);
+  $('btnOpen').onclick = () => openExternal(base64, filename, statusEl);
+  await renderPdfInline(base64, $('pdfView'));
+}
+
+// base64 → Uint8Array (PDF.js wants raw bytes)
+function b64ToU8(b64){
+  const s = atob(String(b64).replace(/^data:.*;base64,/, ''));
+  const u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return u8;
+}
+
+// Render every page to a canvas, stacked in a scrollable box — the in-app viewer.
+async function renderPdfInline(base64, viewer){
+  try {
+    if (!window.pdfjsLib) throw new Error('viewer not loaded');
+    const pdf = await pdfjsLib.getDocument({ data: b64ToU8(base64) }).promise;
+    viewer.innerHTML = '';
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (let p = 1; p <= pdf.numPages; p++){
+      const page  = await pdf.getPage(p);
+      const box   = (viewer.clientWidth || 340) - 12;
+      const unit  = page.getViewport({ scale: 1 });
+      const scale = Math.max(0.4, box / unit.width);
+      const vp    = page.getViewport({ scale: scale * dpr });
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pdfpage';
+      canvas.width = vp.width; canvas.height = vp.height; canvas.style.width = '100%';
+      viewer.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    }
+  } catch (e) {
+    viewer.innerHTML = `<div class="status err" style="margin:10px">Couldn't show the preview here (${e.message}). Tap Download to save the PDF, or Open in… to view it in a PDF app.</div>`;
+  }
+}
+
+// Download = save to the device. Silent to public Documents where the OS allows it
+// (web + Android ≤10); on Android 11+ scoped storage blocks that, so we fall back to the
+// system "Save to file" chooser so the PDF still lands in Downloads/Drive/etc.
+async function savePdf(base64, filename, statusEl){
+  if (!isNative()){
     try {
+      const url = URL.createObjectURL(new Blob([b64ToU8(base64)], { type:'application/pdf' }));
+      const a = document.createElement('a'); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      setSt(statusEl, '✓ Downloaded ' + filename, 'ok');
+    } catch (e){ setSt(statusEl, '✗ Save failed: ' + (e.message||e), 'err'); }
+    return;
+  }
+  const { Filesystem } = window.Capacitor.Plugins;
+  // 1) best-effort SILENT save to the public Documents folder (works on Android ≤10 / some OEMs)
+  try {
+    await Filesystem.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });
+    return setSt(statusEl, '✓ Saved to Documents/' + filename, 'ok');
+  } catch (_) { /* Android 11+ scoped storage — fall through to the always-works path */ }
+  // 2) always-works fallback: stage in app storage, then the OS "Save to file" chooser
+  try {
+    await Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE' });
+    const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
+    const Share = window.Capacitor.Plugins.Share;
+    if (Share){ await Share.share({ title: filename, url: uri }); setSt(statusEl, 'Choose where to save the PDF.', 'ok'); }
+    else setSt(statusEl, '✗ Save unavailable on this device.', 'err');
+  } catch (e){
+    if (!/cancel|dismiss|abort/i.test(e.message||'')) setSt(statusEl, '✗ Save failed: ' + (e.message||e), 'err');
+  }
+}
+
+// Optional: open in an external PDF app — only fires when the user taps "Open in…".
+async function openExternal(base64, filename, statusEl){
+  try {
+    if (isNative()){
       const { Filesystem } = window.Capacitor.Plugins;
       await Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE' });
       const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
       const Share = window.Capacitor.Plugins.Share;
-      if (Share) { await Share.share({ title: filename, text: 'Your land record', url: uri }); }
-      setSt(statusEl, '✓ Saved. Opening ' + filename + ' — choose a PDF viewer.', 'ok');
-      return `<div class="muted" style="text-align:center;margin-top:10px">Saved to the app. Use the sheet to open/save it.</div>`;
-    } catch (e) {
-      setSt(statusEl, '✗ Could not open the PDF: ' + e.message, 'err');
-      return '';
+      if (Share) await Share.share({ title: filename, url: uri });
+      else setSt(statusEl, 'No app available to open it.', 'err');
+    } else {
+      const url = URL.createObjectURL(new Blob([b64ToU8(base64)], { type:'application/pdf' }));
+      const w = window.open(url, '_blank');
+      if (!w) setSt(statusEl, 'Pop-up blocked — use Download instead.', 'warn');
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
     }
+  } catch (e){
+    if (!/cancel|dismiss|abort/i.test(e.message||'')) setSt(statusEl, '✗ Could not open: ' + (e.message||e), 'err');
   }
-  const url = 'data:application/pdf;base64,' + base64;
-  return `<a class="dl" href="${url}" download="${filename}">⬇ Download ${filename}</a><iframe src="${url}"></iframe>`;
 }
 
 function goHome(){ $('flow').classList.add('hidden'); $('home').classList.remove('hidden'); }
@@ -267,7 +354,7 @@ $('btnVerify').onclick = async () => {
   if(ok&&j.status&&j.data){
     setSt($('st2'),`✓ Ready (${Date.now()-t}ms · ${Math.round(j.data.length*0.75/1024)} KB)`,'ok');
     const fn=(DOC==='patta'?'patta':'aregister')+'.pdf';
-    $('result').innerHTML = await deliverPdf(j.data, fn, $('st2'));
+    await deliverPdf(j.data, fn, $('st2'));
   } else setSt($('st2'),`✗ ${j.message||j.code||'failed'}`,'err');
 };
 $('btnResend').onclick = async () => {
