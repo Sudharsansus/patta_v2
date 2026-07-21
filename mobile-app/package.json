@@ -5,7 +5,9 @@
   "description": "MyPropertyQR — Patta + A-Register land records (Android wrapper)",
   "dependencies": {
     "@capacitor/android": "^6.2.0",
-    "@capacitor/core": "^6.2.0"
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/share": "^6.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0"

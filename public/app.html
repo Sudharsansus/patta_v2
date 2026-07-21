@@ -144,6 +144,41 @@ const setSt = (el, msg, kind='') => { el.className = 'status ' + kind; el.innerH
 const spin = (t) => `<span class="spin"></span>${t}`;
 const nameOf = (s) => s.options[s.selectedIndex] ? (s.options[s.selectedIndex].dataset.name||'') : '';
 const ACC = { patta:'#0ea5b7', aregister:'#8b5cf6' };
+const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+
+// Auto-retry transient government blips (GOVT_DOWN / timeout / shedding) so the user
+// doesn't see "portal unavailable" for something a retry fixes.
+async function apiRetry(path, opts, onWait, tries = 3) {
+  const RETRYABLE = ['GOVT_DOWN','GOVT_TIMEOUT','SHEDDING','OTP_SEND_FAILED'];
+  for (let i = 0; i < tries; i++) {
+    const r = await api(path, opts);
+    const canRetry = !r.ok && r.j && (r.j.retryable || RETRYABLE.includes(r.j.code));
+    if (r.ok || !canRetry || i === tries - 1) return r;
+    if (onWait) onWait(i + 1);
+    await new Promise((res) => setTimeout(res, 2500 + i * 1500));
+  }
+}
+
+// Deliver the PDF: on the native app, save + open it in the device's PDF viewer
+// (WebView can't render PDF inline); on the web, download link + inline preview.
+async function deliverPdf(base64, filename, statusEl) {
+  if (isNative()) {
+    try {
+      const { Filesystem } = window.Capacitor.Plugins;
+      await Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE' });
+      const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
+      const Share = window.Capacitor.Plugins.Share;
+      if (Share) { await Share.share({ title: filename, text: 'Your land record', url: uri }); }
+      setSt(statusEl, '✓ Saved. Opening ' + filename + ' — choose a PDF viewer.', 'ok');
+      return `<div class="muted" style="text-align:center;margin-top:10px">Saved to the app. Use the sheet to open/save it.</div>`;
+    } catch (e) {
+      setSt(statusEl, '✗ Could not open the PDF: ' + e.message, 'err');
+      return '';
+    }
+  }
+  const url = 'data:application/pdf;base64,' + base64;
+  return `<a class="dl" href="${url}" download="${filename}">⬇ Download ${filename}</a><iframe src="${url}"></iframe>`;
+}
 
 function goHome(){ $('flow').classList.add('hidden'); $('home').classList.remove('hidden'); }
 function openFlow(doc){
@@ -207,7 +242,8 @@ $('btnStart').onclick = async () => {
     surveyNumber:$('survey').value.trim(), subDivisionNumber:$('subdiv').value.trim(), landType:document.querySelector('input[name=lt]:checked').value, memberId:'app' };
   $('btnStart').disabled=true; setSt($('st1'), spin('Sending OTP… (a few seconds)'), 'warn');
   const t=Date.now();
-  const { ok, j } = await api(`/api/${DOC}/start`, { method:'POST', body:JSON.stringify(payload) });
+  const { ok, j } = await apiRetry(`/api/${DOC}/start`, { method:'POST', body:JSON.stringify(payload) },
+    (n) => setSt($('st1'), spin(`Government portal busy — retrying (${n})…`), 'warn'));
   $('btnStart').disabled=false;
   if(ok&&j.status){ REF=j.referenceId; setSt($('st1'),`✓ OTP sent to ${m} (${Date.now()-t}ms)`,'ok'); $('s2card').classList.remove('hidden'); setSt($('st2'),'Enter the OTP from the SMS.','muted'); $('otp').focus(); $('s2card').scrollIntoView({behavior:'smooth'}); }
   else setSt($('st1'),`✗ ${j.message||j.code||'failed'}`,'err');
@@ -219,12 +255,13 @@ $('btnVerify').onclick = async () => {
   if(!/^\d{4,8}$/.test(otp)) return setSt($('st2'),'Enter the 4–8 digit OTP.','err');
   $('btnVerify').disabled=true; setSt($('st2'), spin('Verifying & fetching the document…'), 'warn'); $('result').innerHTML='';
   const t=Date.now();
-  const { ok, j } = await api(`/api/${DOC}/verify`, { method:'POST', body:JSON.stringify({ referenceId:REF, otp }) });
+  const { ok, j } = await apiRetry(`/api/${DOC}/verify`, { method:'POST', body:JSON.stringify({ referenceId:REF, otp }) },
+    (n) => setSt($('st2'), spin(`Government portal busy — retrying (${n})…`), 'warn'));
   $('btnVerify').disabled=false;
   if(ok&&j.status&&j.data){
     setSt($('st2'),`✓ Ready (${Date.now()-t}ms · ${Math.round(j.data.length*0.75/1024)} KB)`,'ok');
-    const url='data:application/pdf;base64,'+j.data; const fn=(DOC==='patta'?'patta':'aregister')+'.pdf';
-    $('result').innerHTML=`<a class="dl" href="${url}" download="${fn}">⬇ Download ${fn}</a><iframe src="${url}"></iframe>`;
+    const fn=(DOC==='patta'?'patta':'aregister')+'.pdf';
+    $('result').innerHTML = await deliverPdf(j.data, fn, $('st2'));
   } else setSt($('st2'),`✗ ${j.message||j.code||'failed'}`,'err');
 };
 $('btnResend').onclick = async () => {
