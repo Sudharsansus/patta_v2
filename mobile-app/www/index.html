@@ -136,9 +136,15 @@ const KEY  = () => window.MPQR.API_KEY || '';
 let DOC = 'patta';                       // 'patta' | 'aregister'
 let REF = '';
 const api = async (path, opts = {}) => {
-  const r = await fetch(BASE() + path, { ...opts, headers: { 'Content-Type':'application/json', 'X-API-Key': KEY(), ...(opts.headers||{}) } });
-  const t = await r.text(); let j; try { j = JSON.parse(t); } catch(e){ j = { status:false, message:t.slice(0,200) }; }
-  return { ok:r.ok, code:r.status, j };
+  try {
+    const r = await fetch(BASE() + path, { ...opts, headers: { 'Content-Type':'application/json', 'X-API-Key': KEY(), ...(opts.headers||{}) } });
+    const t = await r.text(); let j; try { j = JSON.parse(t); } catch(e){ j = { status:false, message:t.slice(0,200) }; }
+    return { ok:r.ok, code:r.status, j };
+  } catch (e) {
+    // Network/TLS/CORS reject → treat as a retryable blip so apiRetry retries it and
+    // the handler never hangs with the button stuck + spinner forever.
+    return { ok:false, code:0, j:{ status:false, code:'GOVT_DOWN', retryable:true, message:'Network hiccup — retrying…' } };
+  }
 };
 const setSt = (el, msg, kind='') => { el.className = 'status ' + kind; el.innerHTML = msg; };
 const spin = (t) => `<span class="spin"></span>${t}`;
