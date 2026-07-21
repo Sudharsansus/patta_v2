@@ -113,15 +113,19 @@ function sendError(req, res, err, endpoint, meta = {}) {
 
 // Build /start /verify /resend for one document engine.
 function buildDocRoutes(app, { basePath, svc, docType }) {
+  // Breaker tuned to only trip on a SUSTAINED real outage (not a few throttled blips),
+  // and recover fast (8s) so it never blocks everyone for long. The proxy pool is the
+  // real fix for throttling; this just stops a transient blip cascading to "everyone down".
+  const BRK = { volumeThreshold: 12, errorThresholdPercentage: 70, resetTimeout: 8000 };
   const govtStart = makeBreaker(`${docType}-start`, async (mobile, payload) => {
     const codes = await metrics.timeStage('resolve', () => resolveGovCodes(payload));
     const parcel = toParcel(payload, codes, docType);
     const out = await metrics.timeStage('send', () => svc.beginVerification(mobile, parcel));
     return { out, parcel };
-  }, { timeout: 120000 });
+  }, { timeout: 120000, ...BRK });
   const govtVerify = makeBreaker(`${docType}-verify`, async (pendingId, otp) => (
     svc.completeVerification(pendingId, otp)
-  ), { timeout: 180000 });
+  ), { timeout: 180000, ...BRK });
   const idempotency = new IdempotencyCache({ ttlMs: 300000, max: 32, keepRejection: (err) => TERMINAL_CODES.has(classify(err).code) });
 
   app.post(`${basePath}/start`, async (req, res) => {
