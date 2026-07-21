@@ -37,23 +37,31 @@ docker run -d --name mpqr --restart unless-stopped -p 127.0.0.1:8080:8080 \
   mpqr-combined:latest
 
 # --- Caddy: automatic HTTPS on <ip>.sslip.io → localhost:8080 ---
-# AL2023 isn't in Caddy's auto-detect repo; pin the el/9 RPM (AL2023 ships glibc 2.34).
-dnf install -y dnf-plugins-core
-cat > /etc/yum.repos.d/caddy-stable.repo <<'REPO'
-[caddy-stable]
-name=Caddy Stable
-baseurl=https://dl.cloudsmith.io/public/caddy/stable/rpm/el/9/$basearch
-gpgcheck=1
-gpgkey=https://dl.cloudsmith.io/public/caddy/stable/gpg.key
-enabled=1
-REPO
-dnf install -y caddy
+# Install from the official static binary (no distro repo — AL2023 isn't in Caddy's
+# RPM repo and the el/9 mirror returns empty metadata, which fails `dnf install caddy`).
+curl -fsSL -o /tmp/caddy "https://caddyserver.com/api/download?os=linux&arch=amd64"
+install -m 0755 /tmp/caddy /usr/bin/caddy
+/usr/bin/caddy version
+mkdir -p /etc/caddy /var/lib/caddy
 cat > /etc/caddy/Caddyfile <<CADDY
 ${HOST} {
   reverse_proxy localhost:8080
 }
 CADDY
+cat > /etc/systemd/system/caddy.service <<'UNIT'
+[Unit]
+Description=Caddy
+After=network.target
+[Service]
+ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --force
+Restart=on-failure
+Environment=XDG_DATA_HOME=/var/lib/caddy
+LimitNOFILE=1048576
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
 systemctl enable --now caddy
-systemctl restart caddy
 
 echo "=== MPQR EC2 setup DONE: https://${HOST} ($(date)) ==="
