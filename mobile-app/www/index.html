@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>MyPropertyQR — Land Records</title>
+<title>MyPropertyQR — Patta (Client API demo)</title>
 <style>
   :root { --bg:#0b1220; --card:#151f33; --card2:#0f1830; --line:#26324a; --txt:#e8eefc; --dim:#93a3c0;
           --patta:#0ea5b7; --areg:#8b5cf6; --ok:#22c55e; --err:#ef4444; --warn:#f59e0b; }
@@ -69,6 +69,17 @@
   .rec .rtx .d { color:var(--dim); font-size:.78rem; margin-top:2px; }
   .step { font-size:.72rem; color:var(--dim); text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
   footer { text-align:center; color:var(--dim); font-size:.72rem; margin-top:22px; }
+
+  /* Raw payload inspector */
+  details.raw { margin-top:14px; }
+  details.raw > summary { cursor:pointer; color:var(--dim); font-size:.8rem; letter-spacing:.02em; list-style:none; padding:4px 2px; }
+  details.raw > summary::-webkit-details-marker { display:none; }
+  details.raw > summary::before { content:'▸ '; }
+  details.raw[open] > summary::before { content:'▾ '; }
+  pre.raw { white-space:pre-wrap; word-break:break-word; font-size:.72rem; line-height:1.4; margin:8px 0 0;
+            background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:12px; color:var(--dim);
+            overflow:auto; max-height:44vh; -webkit-overflow-scrolling:touch;
+            font-family:ui-monospace,'SFMono-Regular',Consolas,monospace; }
 </style>
 </head>
 <body>
@@ -80,273 +91,72 @@
     };
   </script>
 
-  <!-- HOME -->
-  <div id="home">
-    <header>
-      <h1>MyPropertyQR</h1>
-      <div class="tag">Tamil Nadu land records · direct from the government</div>
-    </header>
-    <div class="cards">
-      <div class="pick patta" onclick="openFlow('patta')">
-        <div class="ic">P</div>
-        <div><div class="t">Patta / Chitta</div><div class="d">Ownership record + FMB sketch</div></div>
-        <div class="arrow">›</div>
-      </div>
-      <div class="pick areg" onclick="openFlow('aregister')">
-        <div class="ic">A</div>
-        <div><div class="t">A-Register (Adangal)</div><div class="d">Village land register extract</div></div>
-        <div class="arrow">›</div>
-      </div>
+  <header>
+    <h1>MyPropertyQR · Patta</h1>
+    <div class="tag">Client API demo · speaks the client's payload contract</div>
+  </header>
+
+  <!-- Step 1 -->
+  <div class="card" id="s1card">
+    <div class="step">Step 1 · Choose the land + mobile</div>
+    <label>District</label><select id="district"><option value="">Loading…</option></select>
+    <label>Taluk</label><select id="taluk" disabled><option value="">—</option></select>
+    <label>Village</label><select id="village" disabled><option value="">—</option></select>
+    <div class="row2">
+      <div><label>Survey number</label><input id="survey" placeholder="e.g. 123" inputmode="text" /></div>
+      <div><label>Sub-division</label><select id="subdiv" disabled><option value="">— survey first —</option></select></div>
     </div>
-    <div id="recent" class="recent hidden"></div>
-    <footer>Powered by MyPropertyQR · build v2 · in-app viewer + 24h saved copies</footer>
+    <label>Land type</label>
+    <div class="lt">
+      <label><input type="radio" name="lt" value="R" checked /><span>Rural</span></label>
+      <label><input type="radio" name="lt" value="N" /><span>Natham</span></label>
+    </div>
+    <label>Mobile number (of the owner)</label>
+    <input id="mobile" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" />
+    <button class="go" id="btnStart">Send OTP</button>
+    <div id="st1" class="status muted">Fill the details, then Send OTP.</div>
   </div>
 
-  <!-- FLOW -->
-  <div id="flow" class="hidden">
-    <div class="bar">
-      <button class="back" onclick="goHome()">‹ Back</button>
-      <span id="badge" class="badge"></span>
-      <span id="flowTitle" style="font-weight:700"></span>
-    </div>
-
-    <!-- Step 1 -->
-    <div class="card" id="s1card">
-      <div class="step">Step 1 · Choose the land + mobile</div>
-      <label>District</label><select id="district"><option value="">Loading…</option></select>
-      <label>Taluk</label><select id="taluk" disabled><option value="">—</option></select>
-      <label>Village</label><select id="village" disabled><option value="">—</option></select>
-      <div class="row2">
-        <div><label>Survey number</label><input id="survey" placeholder="e.g. 123/2" inputmode="text" /></div>
-        <div><label>Sub-division</label><select id="subdiv" disabled><option value="">— survey first —</option></select></div>
-      </div>
-      <label>Land type</label>
-      <div class="lt">
-        <label><input type="radio" name="lt" value="R" checked /><span>Rural</span></label>
-        <label><input type="radio" name="lt" value="N" /><span>Natham</span></label>
-      </div>
-      <label>Mobile number (of the owner)</label>
-      <input id="mobile" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" />
-      <button class="go" id="btnStart">Send OTP</button>
-      <div id="st1" class="status muted">Fill the details, then Send OTP.</div>
-    </div>
-
-    <!-- Step 2 -->
-    <div class="card hidden" id="s2card">
-      <div id="otpArea">
-        <div class="step">Step 2 · Enter the OTP</div>
-        <label>OTP (from the SMS)</label>
-        <input id="otp" type="tel" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="4–8 digits" />
-        <button class="go" id="btnVerify">Verify &amp; Download</button>
-        <button class="go ghost" id="btnResend" style="margin-top:8px">Resend OTP</button>
-      </div>
-      <div id="st2" class="status muted">Waiting for the OTP…</div>
-      <div id="result"></div>
-    </div>
+  <!-- Step 2 -->
+  <div class="card hidden" id="s2card">
+    <div class="step">Step 2 · Enter the OTP</div>
+    <label>OTP (from the SMS)</label>
+    <input id="otp" type="tel" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="4–8 digits" />
+    <button class="go" id="btnVerify">Verify &amp; Get PDF</button>
+    <div id="st2" class="status muted">Waiting for the OTP…</div>
+    <div id="result"></div>
+    <details id="rawBox" class="raw hidden">
+      <summary>Raw request + response JSON (the exact client payload)</summary>
+      <pre id="rawJson" class="raw"></pre>
+    </details>
   </div>
+
+  <footer>Powered by MyPropertyQR · Patta client-API demo</footer>
 
 <script src="vendor/pdfjs/pdf.min.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const BASE = () => (window.MPQR.BACKEND || '').replace(/\/$/, '');
 const KEY  = () => window.MPQR.API_KEY || '';
-let DOC = 'patta';                       // 'patta' | 'aregister'
-let REF = '';
+const ACC  = '#0ea5b7';                  // patta teal accent
+
+// Fetch wrapper. The client's contract nests status/message under `res`, so every
+// failure path is normalised to { res:{ status:false, message } } — handlers read j.res uniformly.
 const api = async (path, opts = {}) => {
   try {
     const r = await fetch(BASE() + path, { ...opts, headers: { 'Content-Type':'application/json', 'X-API-Key': KEY(), ...(opts.headers||{}) } });
-    const t = await r.text(); let j; try { j = JSON.parse(t); } catch(e){ j = { status:false, message:t.slice(0,200) }; }
+    const t = await r.text(); let j; try { j = JSON.parse(t); } catch(e){ j = { res:{ status:false, message:(t||'').slice(0,300) || 'non-JSON response' } }; }
     return { ok:r.ok, code:r.status, j };
   } catch (e) {
-    // Network/TLS/CORS reject → treat as a retryable blip so apiRetry retries it and
-    // the handler never hangs with the button stuck + spinner forever.
-    return { ok:false, code:0, j:{ status:false, code:'GOVT_DOWN', retryable:true, message:'Network hiccup — retrying…' } };
+    return { ok:false, code:0, j:{ res:{ status:false, message:'Network error: ' + (e.message || e) } } };
   }
 };
 const setSt = (el, msg, kind='') => { el.className = 'status ' + kind; el.innerHTML = msg; };
 const spin = (t) => `<span class="spin"></span>${t}`;
 const nameOf = (s) => s.options[s.selectedIndex] ? (s.options[s.selectedIndex].dataset.name||'') : '';
-const ACC = { patta:'#0ea5b7', aregister:'#8b5cf6' };
-const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('vendor/pdfjs/pdf.worker.min.js', document.baseURI).href;
 
-// ── 24h on-device cache: re-view a fetched patta / A-Register WITHOUT spending another OTP.
-// The PDF the user already unlocked with a valid OTP is kept on THEIR device for 24h.
-// It never serves a fresh doc without OTP, so the government's owner-OTP is not bypassed.
-const CACHE_K = 'mpqr_cache_v1', CACHE_TTL = 24*60*60*1000;
-function cacheAll(){ try { return JSON.parse(localStorage.getItem(CACHE_K)||'[]').filter(e => Date.now()-e.ts < CACHE_TTL); } catch(_){ return []; } }
-function cacheWrite(list){ try { localStorage.setItem(CACHE_K, JSON.stringify(list.slice(0,5))); return true; } catch(_){ try { localStorage.setItem(CACHE_K, JSON.stringify(list.slice(0,2))); return true; } catch(__){ return false; } } }
-const esc = (s) => String(s==null?'':s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
-function ago(ts){ const m=Math.floor((Date.now()-ts)/60000); if(m<1) return 'just now'; if(m<60) return m+'m ago'; return Math.floor(m/60)+'h ago'; }
-function currentParcel(){
-  return { district:$('district').value, taluk:$('taluk').value, village:$('village').value,
-    survey:$('survey').value.trim(), subdiv:$('subdiv').value.trim(),
-    landtype:(document.querySelector('input[name=lt]:checked')||{}).value||'R', villageName:nameOf($('village')) };
-}
-function ckey(doc,p){ return [doc,p.district,p.taluk,p.village,(p.survey||'').toLowerCase(),p.subdiv,p.landtype].join('|'); }
-function parcelLabel(p){ return 'S.No ' + p.survey + (p.subdiv? '/'+p.subdiv : '') + ' · ' + (p.villageName||p.village); }
-function cachePut(doc,p,base64){ let l=cacheAll().filter(e=>e.key!==ckey(doc,p)); l.unshift({ key:ckey(doc,p), doc, label:parcelLabel(p), data:base64, ts:Date.now() }); return cacheWrite(l); }
-function cacheFind(doc,p){ return cacheAll().find(e=>e.key===ckey(doc,p)); }
-function renderRecent(){
-  const list = cacheAll(); cacheWrite(list);
-  const box = $('recent'); if(!box) return;
-  if(!list.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
-  box.classList.remove('hidden');
-  box.innerHTML = '<div class="recent-h">Saved · view again, no OTP</div>' + list.map((e)=>
-    `<div class="rec" data-key="${esc(e.key)}">
-       <div class="ric ${e.doc==='patta'?'patta':'areg'}">${e.doc==='patta'?'P':'A'}</div>
-       <div class="rtx"><div class="t">${esc(e.label)}</div><div class="d">${e.doc==='patta'?'Patta / Chitta':'A-Register'} · ${ago(e.ts)}</div></div>
-       <div class="arrow">›</div>
-     </div>`).join('');
-  // Key-stable click binding — never open by positional index (a pruned entry would shift indices).
-  box.querySelectorAll('.rec').forEach(el => el.onclick = () => openCachedByKey(el.getAttribute('data-key')));
-}
-function openCachedByKey(key){ openCachedEntry(cacheAll().find(x => x.key === key)); }
-function openCachedEntry(e){
-  if(!e) return;
-  DOC = e.doc; REF = '';
-  document.documentElement.style.setProperty('--acc', ACC[e.doc]);
-  $('home').classList.add('hidden'); $('flow').classList.remove('hidden');
-  $('badge').className = 'badge ' + (e.doc==='patta'?'patta':'areg');
-  $('badge').textContent = e.doc==='patta' ? 'PATTA' : 'A-REGISTER';
-  $('flowTitle').textContent = e.doc==='patta' ? 'Patta / Chitta' : 'A-Register';
-  $('s1card').classList.add('hidden'); $('s2card').classList.remove('hidden'); $('otpArea').classList.add('hidden');
-  setSt($('st2'), '✓ Saved copy · no OTP used (' + ago(e.ts) + ')', 'ok');
-  deliverPdf(e.data, (e.doc==='patta'?'patta':'aregister')+'.pdf', $('st2'));
-}
-function viewCurrentSaved(){ openCachedEntry(cacheFind(DOC, currentParcel())); }
-
-// Auto-retry transient government blips (GOVT_DOWN / timeout / shedding) so the user
-// doesn't see "portal unavailable" for something a retry fixes.
-async function apiRetry(path, opts, onWait, tries = 3) {
-  const RETRYABLE = ['GOVT_DOWN','GOVT_TIMEOUT','SHEDDING','OTP_SEND_FAILED'];
-  for (let i = 0; i < tries; i++) {
-    const r = await api(path, opts);
-    const canRetry = !r.ok && r.j && (r.j.retryable || RETRYABLE.includes(r.j.code));
-    if (r.ok || !canRetry || i === tries - 1) return r;
-    if (onWait) onWait(i + 1);
-    await new Promise((res) => setTimeout(res, 2500 + i * 1500));
-  }
-}
-
-// Deliver the PDF: render it INSIDE the app with PDF.js (works offline in the WebView),
-// with a Download button + an optional "Open in…" — no auto-redirect to the share sheet.
-async function deliverPdf(base64, filename, statusEl) {
-  const res = $('result');
-  res.innerHTML =
-    `<div class="pdfbar">
-       <button class="go" id="btnDl">⬇ Download</button>
-       <button class="go ghost" id="btnOpen">Open in…</button>
-     </div>
-     <div id="pdfView" class="pdfview"><div class="muted" style="padding:22px;text-align:center">${spin('Rendering preview…')}</div></div>`;
-  $('btnDl').style.background = ACC[DOC];
-  $('btnDl').onclick   = () => savePdf(base64, filename, statusEl);
-  $('btnOpen').onclick = () => openExternal(base64, filename, statusEl);
-  await renderPdfInline(base64, $('pdfView'));
-}
-
-// base64 → Uint8Array (PDF.js wants raw bytes)
-function b64ToU8(b64){
-  const s = atob(String(b64).replace(/^data:.*;base64,/, ''));
-  const u8 = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
-  return u8;
-}
-
-// Render every page to a canvas, stacked in a scrollable box — the in-app viewer.
-async function renderPdfInline(base64, viewer){
-  try {
-    if (!window.pdfjsLib) throw new Error('viewer not loaded');
-    const pdf = await pdfjsLib.getDocument({ data: b64ToU8(base64) }).promise;
-    viewer.innerHTML = '';
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    for (let p = 1; p <= pdf.numPages; p++){
-      const page  = await pdf.getPage(p);
-      const box   = (viewer.clientWidth || 340) - 12;
-      const unit  = page.getViewport({ scale: 1 });
-      const scale = Math.max(0.4, box / unit.width);
-      const vp    = page.getViewport({ scale: scale * dpr });
-      const canvas = document.createElement('canvas');
-      canvas.className = 'pdfpage';
-      canvas.width = vp.width; canvas.height = vp.height; canvas.style.width = '100%';
-      viewer.appendChild(canvas);
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-    }
-  } catch (e) {
-    viewer.innerHTML = `<div class="status err" style="margin:10px">Couldn't show the preview here (${e.message}). Tap Download to save the PDF, or Open in… to view it in a PDF app.</div>`;
-  }
-}
-
-// Download = save to the device. Silent to public Documents where the OS allows it
-// (web + Android ≤10); on Android 11+ scoped storage blocks that, so we fall back to the
-// system "Save to file" chooser so the PDF still lands in Downloads/Drive/etc.
-async function savePdf(base64, filename, statusEl){
-  if (!isNative()){
-    try {
-      const url = URL.createObjectURL(new Blob([b64ToU8(base64)], { type:'application/pdf' }));
-      const a = document.createElement('a'); a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      setSt(statusEl, '✓ Downloaded ' + filename, 'ok');
-    } catch (e){ setSt(statusEl, '✗ Save failed: ' + (e.message||e), 'err'); }
-    return;
-  }
-  const { Filesystem } = window.Capacitor.Plugins;
-  // 1) best-effort SILENT save to the public Documents folder (works on Android ≤10 / some OEMs)
-  try {
-    await Filesystem.writeFile({ path: filename, data: base64, directory: 'DOCUMENTS', recursive: true });
-    return setSt(statusEl, '✓ Saved to Documents/' + filename, 'ok');
-  } catch (_) { /* Android 11+ scoped storage — fall through to the always-works path */ }
-  // 2) always-works fallback: stage in app storage, then the OS "Save to file" chooser
-  try {
-    await Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE' });
-    const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
-    const Share = window.Capacitor.Plugins.Share;
-    if (Share){ await Share.share({ title: filename, url: uri }); setSt(statusEl, 'Choose where to save the PDF.', 'ok'); }
-    else setSt(statusEl, '✗ Save unavailable on this device.', 'err');
-  } catch (e){
-    if (!/cancel|dismiss|abort/i.test(e.message||'')) setSt(statusEl, '✗ Save failed: ' + (e.message||e), 'err');
-  }
-}
-
-// Optional: open in an external PDF app — only fires when the user taps "Open in…".
-async function openExternal(base64, filename, statusEl){
-  try {
-    if (isNative()){
-      const { Filesystem } = window.Capacitor.Plugins;
-      await Filesystem.writeFile({ path: filename, data: base64, directory: 'CACHE' });
-      const { uri } = await Filesystem.getUri({ path: filename, directory: 'CACHE' });
-      const Share = window.Capacitor.Plugins.Share;
-      if (Share) await Share.share({ title: filename, url: uri });
-      else setSt(statusEl, 'No app available to open it.', 'err');
-    } else {
-      const url = URL.createObjectURL(new Blob([b64ToU8(base64)], { type:'application/pdf' }));
-      const w = window.open(url, '_blank');
-      if (!w) setSt(statusEl, 'Pop-up blocked — use Download instead.', 'warn');
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    }
-  } catch (e){
-    if (!/cancel|dismiss|abort/i.test(e.message||'')) setSt(statusEl, '✗ Could not open: ' + (e.message||e), 'err');
-  }
-}
-
-function goHome(){ $('flow').classList.add('hidden'); $('home').classList.remove('hidden'); renderRecent(); }
-function openFlow(doc){
-  DOC = doc; REF = '';
-  document.documentElement.style.setProperty('--acc', ACC[doc]);
-  $('home').classList.add('hidden'); $('flow').classList.remove('hidden');
-  $('badge').className = 'badge ' + (doc==='patta'?'patta':'areg');
-  $('badge').textContent = doc==='patta' ? 'PATTA' : 'A-REGISTER';
-  $('flowTitle').textContent = doc==='patta' ? 'Patta / Chitta' : 'A-Register';
-  $('btnStart').style.background = ACC[doc];
-  $('btnVerify').style.background = ACC[doc];
-  $('s1card').classList.remove('hidden'); $('otpArea').classList.remove('hidden');
-  $('s2card').classList.add('hidden'); $('result').innerHTML=''; $('otp').value='';
-  setSt($('st1'), 'Fill the details, then Send OTP.', 'muted');
-  loadDistricts();
-}
-
-// ── cascade ──
+// ── cascade ── (verbatim from the government dropdown cascade — these work)
 function fill(sel, list){ sel.innerHTML = '<option value="">— select —</option>' + list.map(x=>`<option value="${x.code}" data-name="${(x.name||'').replace(/"/g,'&quot;')}" data-nflag="${x.nflag||'Y'}">${x.name||x.code}</option>`).join(''); sel.disabled=false; }
 function resetSub(m){ $('subdiv').innerHTML=`<option value="">${m||'— survey first —'}</option>`; $('subdiv').disabled=true; }
 async function loadDistricts(){
@@ -382,62 +192,138 @@ async function loadSub(){
   $('subdiv').innerHTML='<option value="">— select —</option>'+subs.map(x=>`<option value="${x}">${x}</option>`).join(''); $('subdiv').disabled=false;
 }
 
-// ── Step 1: send OTP — but first offer the saved copy so no OTP is wasted on a repeat ──
-async function doSendOtp(){
-  const m=$('mobile').value.trim();
-  const to=$('taluk').options[$('taluk').selectedIndex];
-  const payload={ mobileNo:m, districtCode:$('district').value, talukCode:$('taluk').value, villageCode:$('village').value,
-    nflag:(to&&to.dataset.nflag)||'Y', districtName:nameOf($('district')), talukName:nameOf($('taluk')), villageName:nameOf($('village')),
-    surveyNumber:$('survey').value.trim(), subDivisionNumber:$('subdiv').value.trim(), landType:document.querySelector('input[name=lt]:checked').value, memberId:'app' };
-  $('btnStart').disabled=true; setSt($('st1'), spin('Sending OTP… (a few seconds)'), 'warn');
-  const t=Date.now();
-  const { ok, j } = await apiRetry(`/api/${DOC}/start`, { method:'POST', body:JSON.stringify(payload) },
-    (n) => setSt($('st1'), spin(`Government portal busy — retrying (${n})…`), 'warn'));
-  $('btnStart').disabled=false;
-  if(ok&&j.status){ REF=j.referenceId; setSt($('st1'),`✓ OTP sent to ${m} (${Date.now()-t}ms)`,'ok'); $('s2card').classList.remove('hidden'); $('otpArea').classList.remove('hidden'); setSt($('st2'),'Enter the OTP from the SMS.','muted'); $('otp').focus(); $('s2card').scrollIntoView({behavior:'smooth'}); }
-  else setSt($('st1'),`✗ ${j.message||j.code||'failed'}`,'err');
-}
-$('btnStart').onclick = () => {
-  const m=$('mobile').value.trim();
-  if(!/^[6-9]\d{9}$/.test(m)) return setSt($('st1'),'Enter a valid 10-digit mobile number.','err');
-  if(!nameOf($('village'))) return setSt($('st1'),'Pick district → taluk → village.','err');
-  const cached = cacheFind(DOC, currentParcel());
-  if(cached){
-    setSt($('st1'),
-      `You already downloaded this ${ago(cached.ts)} — view it again <b>without using an OTP</b>?
-       <div class="pdfbar" style="margin-top:10px">
-         <button class="go" style="background:var(--ok);color:#04140a" onclick="viewCurrentSaved()">View saved copy</button>
-         <button class="go ghost" onclick="doSendOtp()">Send new OTP</button>
-       </div>`, 'warn');
-    return;
+// ── raw payload inspector: show the exact JSON that flows to /init and /otp ──
+const _raw = {};
+function renderRaw(){
+  const out = [];
+  if (_raw.init){
+    out.push('══ POST /api/patta/init ══');
+    out.push('REQUEST\n' + JSON.stringify(_raw.init.request, null, 2));
+    out.push('RESPONSE\n' + JSON.stringify(_raw.init.response, null, 2));
   }
-  doSendOtp();
+  if (_raw.otp){
+    out.push('══ POST /api/patta/otp ══');
+    out.push('REQUEST\n' + JSON.stringify(_raw.otp.request, null, 2));
+    out.push('RESPONSE\n' + JSON.stringify(_raw.otp.response, null, 2));
+  }
+  if (!out.length) return;
+  $('rawJson').textContent = out.join('\n\n');
+  $('rawBox').classList.remove('hidden');
+}
+
+// ── PDF delivery: render the /files URL inline with PDF.js + a Download/Open button ──
+async function deliverPdf(url, statusEl){
+  const res = $('result');
+  res.innerHTML =
+    `<div class="pdfbar">
+       <button class="go" id="btnDl">⬇ Download / Open PDF</button>
+     </div>
+     <div id="pdfView" class="pdfview"><div class="muted" style="padding:22px;text-align:center">${spin('Rendering preview…')}</div></div>`;
+  $('btnDl').style.background = ACC;
+  $('btnDl').onclick = () => window.open(url, '_blank');
+  await renderPdfInline(url, $('pdfView'));
+}
+
+// Render every page to a canvas, stacked in a scrollable box — source is the /files URL.
+// /files is open + CORS *, so this cross-origin fetch works with no API key.
+async function renderPdfInline(url, viewer){
+  try {
+    if (!window.pdfjsLib) throw new Error('viewer not loaded');
+    const pdf = await pdfjsLib.getDocument({ url }).promise;
+    viewer.innerHTML = '';
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    for (let p = 1; p <= pdf.numPages; p++){
+      const page  = await pdf.getPage(p);
+      const box   = (viewer.clientWidth || 340) - 12;
+      const unit  = page.getViewport({ scale: 1 });
+      const scale = Math.max(0.4, box / unit.width);
+      const vp    = page.getViewport({ scale: scale * dpr });
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pdfpage';
+      canvas.width = vp.width; canvas.height = vp.height; canvas.style.width = '100%';
+      viewer.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    }
+  } catch (e) {
+    viewer.innerHTML = `<div class="status err" style="margin:10px">Couldn't show the preview here (${e.message}). Tap Download / Open PDF to view it.</div>`;
+  }
+}
+
+// ── Step 1: send OTP — builds the CLIENT init payload (sends NAMES, packs survey/subdiv) ──
+$('btnStart').onclick = async () => {
+  const m = $('mobile').value.trim();
+  if(!/^[6-9]\d{9}$/.test(m)) return setSt($('st1'),'Enter a valid 10-digit mobile number.','err');
+  if(!$('district').value || !$('taluk').value || !$('village').value) return setSt($('st1'),'Pick district → taluk → village.','err');
+  const survey = ($('survey').value.split('/')[0]||'').trim();
+  if(!survey) return setSt($('st1'),'Enter the survey number.','err');
+  const subdiv = $('subdiv').value.trim();
+  if(!subdiv) return setSt($('st1'),'Pick a sub-division (undivided land shows “-”).','err');
+
+  const id = crypto.randomUUID();
+  const packed = survey + '/' + subdiv;                              // "93/1K"  ·  undivided → "93/-"
+  const landType = document.querySelector('input[name=lt]:checked').value;
+  const body = {
+    id: id, memberId: 'app-demo', type: 'mp_patta_init',
+    downloadDocument: 'Patta/app-demo/' + id + '.pdf',
+    data: {
+      district: nameOf($('district')), taluk: nameOf($('taluk')), village: nameOf($('village')),
+      surveyNumber: packed, landType: landType, mobileNo: m
+    }
+  };
+
+  $('btnStart').disabled = true; setSt($('st1'), spin('Sending OTP… (a few seconds)'), 'warn');
+  const t = Date.now();
+  const { ok, j } = await api('/api/patta/init', { method:'POST', body: JSON.stringify(body) });
+  _raw.init = { request: body, response: j }; renderRaw();
+  $('btnStart').disabled = false;
+
+  const res = j.res || {};
+  if(ok && res.status){
+    window._mp = { id: id, followups: res.followups };
+    setSt($('st1'), '✓ ' + (res.message || 'OTP sent') + ' (' + (Date.now()-t) + 'ms)', 'ok');
+    $('s2card').classList.remove('hidden');
+    setSt($('st2'), 'Enter the OTP from the SMS.', 'muted');
+    $('otp').focus(); $('s2card').scrollIntoView({ behavior:'smooth' });
+  } else {
+    setSt($('st1'), '✗ ' + (res.message || 'OTP request failed'), 'err');
+  }
 };
 
-// ── Step 2: verify → PDF ──
+// ── Step 2: verify → PDF — builds the CLIENT otp payload (echoes id + followups) ──
 $('btnVerify').onclick = async () => {
-  const otp=$('otp').value.trim();
+  if(!window._mp || !window._mp.id) return setSt($('st2'),'Send an OTP first.','err');
+  const otp = $('otp').value.trim();
   if(!/^\d{4,8}$/.test(otp)) return setSt($('st2'),'Enter the 4–8 digit OTP.','err');
-  $('btnVerify').disabled=true; setSt($('st2'), spin('Verifying & fetching the document…'), 'warn'); $('result').innerHTML='';
-  const t=Date.now();
-  const { ok, j } = await apiRetry(`/api/${DOC}/verify`, { method:'POST', body:JSON.stringify({ referenceId:REF, otp }) },
-    (n) => setSt($('st2'), spin(`Government portal busy — retrying (${n})…`), 'warn'));
-  $('btnVerify').disabled=false;
-  if(ok&&j.status&&j.data){
-    let saved=false; try { saved = cachePut(DOC, currentParcel(), j.data); } catch(_){}
-    setSt($('st2'),`✓ Ready (${Date.now()-t}ms · ${Math.round(j.data.length*0.75/1024)} KB)${saved?' · saved 24h':''}`,'ok');
-    const fn=(DOC==='patta'?'patta':'aregister')+'.pdf';
-    await deliverPdf(j.data, fn, $('st2'));
-  } else setSt($('st2'),`✗ ${j.message||j.code||'failed'}`,'err');
-};
-$('btnResend').onclick = async () => {
-  setSt($('st2'), spin('Resending…'), 'warn');
-  const { j } = await api(`/api/${DOC}/resend`, { method:'POST', body:JSON.stringify({ referenceId:REF }) });
-  setSt($('st2'), j.status?'OTP resent.':('Resend failed: '+(j.message||'')), j.status?'ok':'err');
+  const m = $('mobile').value.trim();
+
+  const body = {
+    id: window._mp.id, memberId: 'app-demo', type: 'mp_patta_otp',
+    downloadDocument: 'Patta/app-demo/' + window._mp.id + '.pdf',
+    data: { mobileNo: m, otp: otp },
+    followups: window._mp.followups
+  };
+
+  $('btnVerify').disabled = true; setSt($('st2'), spin('Verifying & fetching the PDF…'), 'warn'); $('result').innerHTML='';
+  const t = Date.now();
+  const { ok, j } = await api('/api/patta/otp', { method:'POST', body: JSON.stringify(body) });
+  _raw.otp = { request: body, response: j }; renderRaw();
+  $('btnVerify').disabled = false;
+
+  const res = j.res || {};
+  if(ok && res.status && res.data && res.data[0]){
+    const url = res.data[0];                                          // https://…/files/<token>/patta.pdf
+    setSt($('st2'), '✓ ' + (res.message || 'File uploaded successfully') + ' (' + (Date.now()-t) + 'ms)', 'ok');
+    await deliverPdf(url, $('st2'));
+  } else {
+    setSt($('st2'), '✗ ' + (res.message || 'Verification failed'), 'err');
+  }
 };
 
-// Show saved (≤24h) copies on the home screen at startup.
-renderRecent();
+// ── boot: patta teal accent + open straight into the form ──
+document.documentElement.style.setProperty('--acc', ACC);
+$('btnStart').style.background = ACC;
+$('btnVerify').style.background = ACC;
+loadDistricts();
 </script>
 </body>
 </html>
